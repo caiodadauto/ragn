@@ -33,7 +33,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--tr-path",
         type=str,
-        default="training/All",
+        default="train/All",
         help="Path to the trainig dataset",
     )
     p.add_argument(
