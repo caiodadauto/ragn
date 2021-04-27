@@ -5,7 +5,7 @@ description = ""
 authors = ["Caio Dadauto <caiodadauto@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = ">3.75"
+python = ">3.7.5"
 graph-nets = {git = "https://github.com/caiodadauto/graph_nets.git", rev = "main"}
 # pytop = {git = "https://github.com/caiodadauto/pytop.git", rev = "master"}
 tensorflow = "^2.4.1"
