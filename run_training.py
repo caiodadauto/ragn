@@ -33,14 +33,20 @@ if __name__ == "__main__":
     p.add_argument(
         "--tr-path",
         type=str,
-        default="dataset/training/",
+        default="training/All",
         help="Path to the trainig dataset",
     )
     p.add_argument(
         "--val-path",
         type=str,
-        default="dataset/validation/",
+        default="validation/All",
         help="Path to the validation dataset",
+    )
+    p.add_argument(
+        "--log-path",
+        type=str,
+        default="logs",
+        help="Path to save the assets",
     )
     p.add_argument(
         "--n-msg",

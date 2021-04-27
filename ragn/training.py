@@ -80,6 +80,7 @@ def train_ragn(
     tr_size,
     tr_path,
     val_path,
+    log_path,
     n_msg,
     n_epoch,
     n_batch,
@@ -117,7 +118,7 @@ def train_ragn(
     tf.random.set_seed(seed)
     random_state = np.random.RandomState(seed=seed)
     global_step = tf.Variable(0, trainable=False)
-    logdir = os.path.join("logs", dt.now().strftime("%Y%m%d-%H%M%S"))
+    logdir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
     scalar_writer = tf.summary.create_file_writer(os.path.join(logdir + "/scalars"))
 
     model = EncodeProcessDecode()
