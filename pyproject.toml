@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "ragn"
+version = "0.1.0"
+description = ""
+authors = ["Caio Dadauto <caiodadauto@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+graph-nets = {git = "https://github.com/caiodadauto/graph_nets.git", rev = "main"}
+# pytop = {git = "https://github.com/caiodadauto/pytop.git", rev = "master"}
+tensorflow = "^2.4.1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
