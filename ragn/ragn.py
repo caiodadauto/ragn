@@ -228,7 +228,7 @@ class LocalRoutingNetwork(snt.Module):
                 -1,
                 keepdims=True,
             )
-            attention_input = tf.nn.leaky_relu(att_op, alpha=0.2)
+            attention_input = tf.math.sigmoid(att_op)
             attentions = self._unsorted_segment_softmax(
                 attention_input, graphs.senders, tf.reduce_sum(graphs.n_node)
             )
@@ -250,7 +250,9 @@ class LocalRoutingNetwork(snt.Module):
         output_edges = self._routing_layer(tf.multiply(final_features, final_queries))
         return graphs.replace(
             edges=self._unsorted_segment_softmax(
-                output_edges, graphs.senders, tf.reduce_sum(graphs.n_node)
+                tf.math.sigmoid(output_edges),
+                graphs.senders,
+                tf.reduce_sum(graphs.n_node),
             )
         )
 
