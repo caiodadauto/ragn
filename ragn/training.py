@@ -3,7 +3,6 @@ from time import time
 from datetime import datetime as dt
 
 import numpy as np
-import sonnet as snt
 import networkx as nx
 import tensorflow as tf
 from sklearn.metrics import balanced_accuracy_score
@@ -76,6 +75,88 @@ def get_accuracy(predicted, expected, th=0.5):
     return balanced_accuracy_score(e, p)
 
 
+def set_environment(
+    tr_size,
+    init_lr,
+    end_lr,
+    decay_steps,
+    power,
+    seed,
+    n_batch,
+    log_path,
+    restore_from,
+):
+    global_step = tf.Variable(0, trainable=False)
+    best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
+
+    model = EncodeProcessDecode()
+    lr = tf.compat.v1.train.polynomial_decay(
+        init_lr,
+        global_step,
+        decay_steps=decay_steps,
+        end_learning_rate=end_lr,
+        power=power,
+    )
+    optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
+
+    if restore_from is None:
+        logdir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
+    else:
+        logdir = os.path.join(log_path, restore_from)
+    scalar_writer = tf.summary.create_file_writer(os.path.join(logdir + "/scalars"))
+    ckpt = tf.train.Checkpoint(
+        global_step=global_step,
+        optimizer=optimizer,
+        model=model,
+        best_val_acc_tf=best_val_acc_tf,
+    )
+    last_ckpt_manager = tf.train.CheckpointManager(
+        ckpt, os.path.join(logdir, "last_ckpts"), max_to_keep=3
+    )
+    best_ckpt_manager = tf.train.CheckpointManager(
+        ckpt, os.path.join(logdir, "best_ckpts"), max_to_keep=3
+    )
+
+    tf.random.set_seed(seed)
+    random_state = np.random.RandomState(seed=seed)
+    if restore_from is not None:
+        with open(os.path.join(logdir, "sb.csv"), "r") as f:
+            seed, n_batch = list(
+                map(lambda s: int(s), f.readline().rstrip().split(","))
+            )
+        tf.random.set_seed(seed)
+        random_state = np.random.RandomState(seed=seed)
+        status = ckpt.restore(last_ckpt_manager.latest_checkpoint)
+        if global_step.numpy() > 0:
+            steps_per_epoch = tr_size // n_batch
+            start_epoch = global_step.numpy() // steps_per_epoch
+            if start_epoch > 0:
+                init_batch_tr = global_step.numpy() - steps_per_epoch * start_epoch
+            else:
+                init_batch_tr = global_step.numpy()
+    else:
+        with open(os.path.join(logdir, "sb.csv"), "w") as f:
+            f.write("{}, {}\n".format(seed, n_batch))
+        start_epoch = 0
+        init_batch_tr = 1
+        status = None
+    return (
+        model,
+        lr,
+        n_batch,
+        optimizer,
+        global_step,
+        best_val_acc_tf,
+        start_epoch,
+        init_batch_tr,
+        scalar_writer,
+        last_ckpt_manager,
+        best_ckpt_manager,
+        random_state,
+        status,
+    )
+
+
 def train_ragn(
     tr_size,
     tr_path,
@@ -92,6 +173,7 @@ def train_ragn(
     power=3,
     delta_time_to_validate=20,
     class_weight=tf.constant([1.0, 1.0], tf.float32),
+    restore_from=None,
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -115,47 +197,56 @@ def train_ragn(
         )
         return output_graphs[-1], loss
 
-    tf.random.set_seed(seed)
-    random_state = np.random.RandomState(seed=seed)
-    global_step = tf.Variable(0, trainable=False)
-    logdir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
-    scalar_writer = tf.summary.create_file_writer(os.path.join(logdir + "/scalars"))
+    (
+        model,
+        lr,
+        n_batch,
+        optimizer,
+        global_step,
+        best_val_acc_tf,
+        start_epoch,
+        init_batch_tr,
+        scalar_writer,
+        last_ckpt_manager,
+        best_ckpt_manager,
+        random_state,
+        status,
+    ) = set_environment(
+        tr_size,
+        init_lr,
+        end_lr,
+        decay_steps,
+        power,
+        seed,
+        n_batch,
+        log_path,
+        restore_from,
+    )
 
-    model = EncodeProcessDecode()
+    tr_acc = None
+    val_acc = None
+    asserted = False
+    best_val_acc = best_val_acc_tf.numpy()
     in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path)
     in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
-    lr = tf.compat.v1.train.polynomial_decay(
-        init_lr,
-        global_step,
-        decay_steps=decay_steps,
-        end_learning_rate=end_lr,
-        power=power,
+    epoch_bar = tqdm(
+        total=n_epoch + start_epoch, initial=start_epoch, desc="Processed Epochs"
     )
-    optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
-    epoch_bar = tqdm(total=n_epoch, desc="Processed Epochs")
-
-    ckpt = tf.train.Checkpoint(step=global_step, optimizer=optimizer, net=model)
-    last_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "last_ckpts"), max_to_keep=3
-    )
-    best_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "best_ckpts"), max_to_keep=3
-    )
-
+    epoch_bar.set_postfix(loss=None, best_val_acc=best_val_acc)
     if not debug:
         eval = tf.function(eval, input_signature=[in_signarute])
         update_model_weights = tf.function(
             update_model_weights, input_signature=[in_signarute, gt_signature]
         )
-
-    tr_acc = None
-    val_acc = None
-    best_val_acc = 0
     start_time = time()
     last_validation = start_time
-    for _ in range(n_epoch):
-        batch_bar = tqdm(total=tr_size, desc="Processed Graphs", leave=False)
-        print("Get training batch")
+    for _ in range(start_epoch, n_epoch + start_epoch):
+        batch_bar = tqdm(
+            total=tr_size,
+            initial=n_batch * init_batch_tr,
+            desc="Processed Graphs",
+            leave=False,
+        )
         train_generator = networkx_to_graph_tuple_generator(
             pytop.batch_files_generator(
                 tr_path,
@@ -165,10 +256,14 @@ def train_ragn(
                 bidim_solution=False,
                 shuffle=True,
                 random_state=random_state,
+                start_point=init_batch_tr,
             )
         )
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
             out_tr_graphs, loss = update_model_weights(in_graphs, gt_graphs)
+            if not asserted and status is not None:
+                status.assert_consumed()
+                asserted = True
             log_scalars(
                 scalar_writer,
                 {"loss": loss.numpy(), "learning rate": lr().numpy()},
@@ -188,6 +283,7 @@ def train_ragn(
                 last_ckpt_manager.save()
                 if best_val_acc <= val_acc:
                     best_ckpt_manager.save()
+                    best_val_acc_tf.assign(best_val_acc)
             batch_bar.update(in_graphs.n_node.shape[0])
             batch_bar.set_postfix(loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
         epoch_bar.update()

@@ -49,6 +49,12 @@ if __name__ == "__main__":
         help="Path to save the assets",
     )
     p.add_argument(
+        "--restore-from",
+        type=str,
+        default=None,
+        help="Path from log-path that will be used to restore the last checkpoint",
+    )
+    p.add_argument(
         "--n-msg",
         type=int,
         default=40,
@@ -92,7 +98,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--decay-steps",
         type=int,
-        default=100000,
+        default=70000,
         help="Number of steps to reach the final learning rate",
     )
     p.add_argument(
@@ -115,4 +121,3 @@ if __name__ == "__main__":
     )
     args = p.parse_args()
     training.train_ragn(**vars(args))
-    # run(**vars(args))
