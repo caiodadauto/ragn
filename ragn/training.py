@@ -243,7 +243,7 @@ def train_ragn(
     for _ in range(start_epoch, n_epoch + start_epoch):
         batch_bar = tqdm(
             total=tr_size,
-            initial=n_batch * init_batch_tr,
+            initial=n_batch * init_batch_tr if init_batch_tr > 1 else 0,
             desc="Processed Graphs",
             leave=False,
         )
