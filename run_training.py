@@ -121,7 +121,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--class-weight",
         type=weights,
-        default=tf.constant([0.2, 1.0], dtype=tf.float32),
+        default=tf.constant([0.4, 1.0], dtype=tf.float32),
         help="The weight for each class (non-routing link and routing link)",
     )
     args = p.parse_args()
