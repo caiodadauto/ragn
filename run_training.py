@@ -27,7 +27,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--tr-size",
         type=int,
-        default=1000000,
+        default=500000,
         help="Size of training dataset",
     )
     p.add_argument(
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-msg",
         type=int,
-        default=20,
+        default=45,
         help="Number of messages",
     )
     p.add_argument(
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-batch",
         type=int,
-        default=128,
+        default=72,
         help="Batch size",
     )
     p.add_argument(
@@ -94,7 +94,7 @@ if __name__ == "__main__":
         help="Optimizer",
     )
     p.add_argument(
-        "--sufix",
+        "--sufix-name",
         type=str,
         default="",
         help="Sufix name for log dir",
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--decay-steps",
         type=int,
-        default=100000,
+        default=80000,
         help="Number of steps to reach the final learning rate",
     )
     p.add_argument(
