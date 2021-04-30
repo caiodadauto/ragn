@@ -75,6 +75,14 @@ def get_accuracy(predicted, expected, th=0.5):
     return balanced_accuracy_score(e, p)
 
 
+def bi_get_accuracy(predicted, expected):
+    e = expected.numpy()
+    e = (e[:, 0] <= e[:,1]).astype(int)
+    p = predicted.numpy()
+    p = (p[:, 0] <= p[:,1]).astype(int)
+    return balanced_accuracy_score(e, p)
+
+
 def binary_crossentropy(expected, output_graphs, class_weight):
     loss_for_all_msg = []
     for predicted_graphs in output_graphs:
@@ -306,8 +314,12 @@ def train_ragn(
             if delta_time >= delta_time_to_validate:
                 out_val_graphs = eval(in_val_graphs)
                 last_validation = time()
-                tr_acc = get_accuracy(out_tr_graphs.edges, gt_graphs.edges)
-                val_acc = get_accuracy(out_val_graphs.edges, gt_val_graphs.edges)
+                if bidim_solution:
+                    tr_acc = bi_get_accuracy(out_tr_graphs.edges, gt_graphs.edges)
+                    val_acc = bi_get_accuracy(out_val_graphs.edges, gt_val_graphs.edges)
+                else:
+                    tr_acc = get_accuracy(out_tr_graphs.edges, gt_graphs.edges)
+                    val_acc = get_accuracy(out_val_graphs.edges, gt_val_graphs.edges)
                 log_scalars(
                     scalar_writer,
                     {"train accuracy": tr_acc, "val accuracy": val_acc},
