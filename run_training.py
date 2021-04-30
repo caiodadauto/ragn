@@ -83,6 +83,11 @@ if __name__ == "__main__":
         help="To use the outputs in one-hot vector format",
     )
     p.add_argument(
+        "--scale-edge",
+        action="store_true",
+        help="Scale edge features",
+    )
+    p.add_argument(
         "--opt",
         type=str,
         default="adam",

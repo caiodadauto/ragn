@@ -6,6 +6,7 @@ import numpy as np
 import networkx as nx
 import tensorflow as tf
 from sklearn.metrics import balanced_accuracy_score
+from sklearn.preprocessing import minmax_scale
 
 import pytop
 from tqdm import tqdm
@@ -44,13 +45,14 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path, bidim_solution):
+def get_validation_gts(path, bidim_solution, scaler):
     gt_generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
             "gpickle",
             -1,
             bidim_solution=bidim_solution,
+            edge_scaler=scaler,
         )
     )
     return next(gt_generator)
@@ -77,9 +79,9 @@ def get_accuracy(predicted, expected, th=0.5):
 
 def bi_get_accuracy(predicted, expected):
     e = expected.numpy()
-    e = (e[:, 0] <= e[:,1]).astype(int)
+    e = (e[:, 0] <= e[:, 1]).astype(int)
     p = predicted.numpy()
-    p = (p[:, 0] <= p[:,1]).astype(int)
+    p = (p[:, 0] <= p[:, 1]).astype(int)
     return balanced_accuracy_score(e, p)
 
 
@@ -123,10 +125,15 @@ def set_environment(
     restore_from,
     bidim_solution,
     opt,
+    scale_edge,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
 
+    if scale_edge:
+        scaler = minmax_scale
+    else:
+        scaler = None
     if bidim_solution:
         loss_fn = crossentropy_logists
         model = EncodeProcessDecode(lookup_fn=BiLocalRoutingNetwork)
@@ -202,6 +209,7 @@ def set_environment(
         best_ckpt_manager,
         random_state,
         status,
+        scaler,
     )
 
 
@@ -224,6 +232,7 @@ def train_ragn(
     restore_from=None,
     bidim_solution=False,
     opt="adam",
+    scale_edge=False,
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -255,6 +264,7 @@ def train_ragn(
         best_ckpt_manager,
         random_state,
         status,
+        scaler,
     ) = set_environment(
         tr_size,
         init_lr,
@@ -267,13 +277,16 @@ def train_ragn(
         restore_from,
         bidim_solution,
         opt,
+        scale_edge,
     )
 
     tr_acc = None
     val_acc = None
     asserted = False
     best_val_acc = best_val_acc_tf.numpy()
-    in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path, bidim_solution)
+    in_val_graphs, gt_val_graphs, _ = get_validation_gts(
+        val_path, bidim_solution, scaler
+    )
     in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
     epoch_bar = tqdm(
         total=n_epoch + start_epoch, initial=start_epoch, desc="Processed Epochs"
@@ -303,6 +316,7 @@ def train_ragn(
                 shuffle=True,
                 random_state=random_state,
                 start_point=init_batch_tr,
+                edge_scaler=scaler,
             )
         )
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
