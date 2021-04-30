@@ -122,6 +122,7 @@ def set_environment(
     log_path,
     restore_from,
     bidim_solution,
+    opt,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
@@ -139,8 +140,10 @@ def set_environment(
         end_learning_rate=end_lr,
         power=power,
     )
-    optimizer = tf.compat.v1.train.AdamOptimizer(lr)
-    # optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
+    if opt == "adam":
+        optimizer = tf.compat.v1.train.AdamOptimizer(lr)
+    else:
+        optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
     if restore_from is None:
         logdir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
@@ -220,6 +223,7 @@ def train_ragn(
     class_weight=tf.constant([1.0, 1.0], tf.float32),
     restore_from=None,
     bidim_solution=False,
+    opt="adam",
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -262,6 +266,7 @@ def train_ragn(
         log_path,
         restore_from,
         bidim_solution,
+        opt,
     )
 
     tr_acc = None

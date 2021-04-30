@@ -83,6 +83,12 @@ if __name__ == "__main__":
         help="To use the outputs in one-hot vector format",
     )
     p.add_argument(
+        "--opt",
+        type=str,
+        default="adam",
+        help="Optimizer",
+    )
+    p.add_argument(
         "--seed",
         type=int,
         default=2,
