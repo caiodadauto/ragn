@@ -178,14 +178,87 @@ def make_mlp_model(size=LATENT_SIZE, n_layers=NUM_LAYERS, model=LeakyReluNormMLP
     return model(size, n_layers)
 
 
-class LocalRoutingNetwork(snt.Module):
+class BiLocalRoutingNetwork(snt.Module):
     def __init__(
         self,
         model_fn=make_mlp_model,
         n_heads=3,
-        name="LocalRoutingNetwork",
+        name="BiLocalRoutingNetwork",
     ):
-        super(LocalRoutingNetwork, self).__init__(name=name)
+        super(BiLocalRoutingNetwork, self).__init__(name=name)
+        self._multihead_models = []
+        self._routing_layer = snt.Linear(2)
+        self._final_node_model = model_fn(model=LeakyReluMLP)
+        self._final_query_model = model_fn(model=LeakyReluMLP)
+        for _ in range(n_heads):
+            self._multihead_models.append(
+                [
+                    model_fn(model=LeakyReluMLP),
+                    model_fn(size=12, model=LeakyReluMLP),
+                    model_fn(size=12, model=LeakyReluMLP),
+                    model_fn(size=8, model=LeakyReluMLP),
+                ]
+            )
+
+    def _unsorted_segment_softmax(self, x, idx, n_idx):
+        op1 = tf.exp(x)
+        op2 = tf.math.unsorted_segment_sum(op1, idx, n_idx)
+        op3 = tf.gather(op2, idx)
+        op4 = tf.divide(op1, op3)
+        return op4
+
+    def __call__(self, graphs, **kwargs):
+        queries = utils_tf.repeat(graphs.globals, graphs.n_edge)
+        senders_feature = tf.gather(graphs.nodes, graphs.senders)
+        receivers_feature = tf.gather(graphs.nodes, graphs.receivers)
+        edge_rec_pair = tf.concat([graphs.edges, receivers_feature], -1)
+
+        multihead_routing = []
+        for (
+            query_model,
+            sender_model,
+            edge_rec_model,
+            multi_model,
+        ) in self._multihead_models:
+            enc_queries = query_model(queries, **kwargs)
+            enc_senders = sender_model(senders_feature, **kwargs)
+            enc_edge_rec = edge_rec_model(edge_rec_pair, **kwargs)
+            att_op = tf.reduce_sum(
+                tf.multiply(tf.concat([enc_senders, enc_edge_rec], -1), enc_queries),
+                -1,
+                keepdims=True,
+            )
+            attention_input = tf.nn.leaky_relu(att_op, alpha=0.2)
+            attentions = self._unsorted_segment_softmax(
+                attention_input, graphs.senders, tf.reduce_sum(graphs.n_node)
+            )
+
+            multhead_op1 = multi_model(edge_rec_pair, **kwargs)
+            multhead_op2 = tf.multiply(attentions, multhead_op1)
+            # multhead_op3 = tf.math.unsorted_segment_sum(
+            #     multhead_op2, graphs.senders, tf.reduce_sum(graphs.n_node)
+            # )
+            multihead_routing.append(multhead_op2)
+        node_attention_feature = tf.concat(multihead_routing, -1)
+        final_features = self._final_node_model(
+            tf.concat(
+                [tf.gather(node_attention_feature, graphs.senders), graphs.edges], -1
+            ),
+            **kwargs,
+        )
+        final_queries = self._final_query_model(queries, **kwargs)
+        output_edges = self._routing_layer(tf.multiply(final_features, final_queries))
+        return graphs.replace(edges=output_edges)
+
+
+class OneLocalRoutingNetwork(snt.Module):
+    def __init__(
+        self,
+        model_fn=make_mlp_model,
+        n_heads=3,
+        name="OneLocalRoutingNetwork",
+    ):
+        super(OneLocalRoutingNetwork, self).__init__(name=name)
         self._multihead_models = []
         self._routing_layer = snt.Linear(1)
         self._final_node_model = model_fn(model=LeakyReluMLP)
@@ -381,10 +454,10 @@ class GraphRecurrentNonLocalNetwork(snt.Module):
 
 
 class EncodeProcessDecode(snt.Module):
-    def __init__(self, name="EncodeProcessDecode"):
+    def __init__(self, lookup_fn=OneLocalRoutingNetwork, name="EncodeProcessDecode"):
         super(EncodeProcessDecode, self).__init__(name=name)
         self._encoder = MLPGraphIndependent()
-        self._lookup = LocalRoutingNetwork()
+        self._lookup = lookup_fn()
         self._core = GraphRecurrentNonLocalNetwork()
 
     def __call__(self, graphs, num_processing_steps, is_training):

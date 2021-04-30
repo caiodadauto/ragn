@@ -12,7 +12,7 @@ from tqdm import tqdm
 from graph_nets import utils_np, utils_tf
 
 # from draw import draw_revertion
-from ragn.ragn import EncodeProcessDecode
+from ragn.ragn import EncodeProcessDecode, BiLocalRoutingNetwork, OneLocalRoutingNetwork
 
 
 def networkxs_to_graphs_tuple(
@@ -44,13 +44,13 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path):
+def get_validation_gts(path, bidim_solution):
     gt_generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
             "gpickle",
             -1,
-            bidim_solution=False,
+            bidim_solution=bidim_solution,
         )
     )
     return next(gt_generator)
@@ -75,6 +75,32 @@ def get_accuracy(predicted, expected, th=0.5):
     return balanced_accuracy_score(e, p)
 
 
+def binary_crossentropy(expected, output_graphs, class_weight):
+    loss_for_all_msg = []
+    for predicted_graphs in output_graphs:
+        predicted = predicted_graphs.edges
+        msg_losses = tf.keras.losses.binary_crossentropy(expected, predicted)
+        msg_losses = tf.gather(class_weight, tf.cast(expected, tf.int32)) * msg_losses
+        msg_loss = tf.math.reduce_mean(msg_losses)
+        loss_for_all_msg.append(msg_loss)
+    loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
+    loss = loss / len(output_graphs)
+    return loss
+
+
+def crossentropy_logists(expected, output_graphs, class_weight):
+    loss_for_all_msg = []
+    for predicted_graphs in output_graphs:
+        predicted = predicted_graphs.edges
+        msg_loss = tf.compat.v1.losses.softmax_cross_entropy(
+            expected, predicted, tf.gather(class_weight, tf.cast(expected, tf.int32))
+        )
+        loss_for_all_msg.append(msg_loss)
+    loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
+    loss = loss / len(output_graphs)
+    return loss
+
+
 def set_environment(
     tr_size,
     init_lr,
@@ -85,11 +111,17 @@ def set_environment(
     n_batch,
     log_path,
     restore_from,
+    bidim_solution,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
 
-    model = EncodeProcessDecode()
+    if bidim_solution:
+        loss_fn = crossentropy_logists
+        model = EncodeProcessDecode(lookup_fn=BiLocalRoutingNetwork)
+    else:
+        loss_fn = binary_crossentropy
+        model = EncodeProcessDecode(lookup=OneLocalRoutingNetwork)
     lr = tf.compat.v1.train.polynomial_decay(
         init_lr,
         global_step,
@@ -97,12 +129,14 @@ def set_environment(
         end_learning_rate=end_lr,
         power=power,
     )
-    optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
+    optimizer = tf.compat.v1.train.AdamOptimizer(lr)
+    # optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
     if restore_from is None:
         logdir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
     else:
         logdir = os.path.join(log_path, restore_from)
+        print("Restore training session from {}".format(logdir))
     scalar_writer = tf.summary.create_file_writer(os.path.join(logdir + "/scalars"))
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
@@ -119,7 +153,13 @@ def set_environment(
 
     tf.random.set_seed(seed)
     random_state = np.random.RandomState(seed=seed)
-    if restore_from is not None:
+    if restore_from is None:
+        with open(os.path.join(logdir, "sb.csv"), "w") as f:
+            f.write("{}, {}\n".format(seed, n_batch))
+        start_epoch = 0
+        init_batch_tr = 1
+        status = None
+    else:
         with open(os.path.join(logdir, "sb.csv"), "r") as f:
             seed, n_batch = list(
                 map(lambda s: int(s), f.readline().rstrip().split(","))
@@ -134,15 +174,10 @@ def set_environment(
                 init_batch_tr = global_step.numpy() - steps_per_epoch * start_epoch
             else:
                 init_batch_tr = global_step.numpy()
-    else:
-        with open(os.path.join(logdir, "sb.csv"), "w") as f:
-            f.write("{}, {}\n".format(seed, n_batch))
-        start_epoch = 0
-        init_batch_tr = 1
-        status = None
     return (
         model,
         lr,
+        loss_fn,
         n_batch,
         optimizer,
         global_step,
@@ -174,23 +209,17 @@ def train_ragn(
     delta_time_to_validate=20,
     class_weight=tf.constant([1.0, 1.0], tf.float32),
     restore_from=None,
+    bidim_solution=False,
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
         return output_graphs[-1]
 
     def update_model_weights(in_graphs, gt_graphs):
-        loss_for_all_msg = []
         expected = gt_graphs.edges
         with tf.GradientTape() as tape:
             output_graphs = model(in_graphs, n_msg, is_training=True)
-            for predicted_graphs in output_graphs:
-                predicted = predicted_graphs.edges
-                losses = tf.keras.losses.binary_crossentropy(expected, predicted)
-                losses = tf.gather(class_weight, tf.cast(expected, tf.int32)) * losses
-                loss_for_all_msg.append(tf.math.reduce_mean(losses))
-            loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
-            loss = loss / len(output_graphs)
+            loss = loss_fn(expected, output_graphs, class_weight)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(
             zip(gradients, model.trainable_variables), global_step=global_step
@@ -200,6 +229,7 @@ def train_ragn(
     (
         model,
         lr,
+        loss_fn,
         n_batch,
         optimizer,
         global_step,
@@ -221,13 +251,14 @@ def train_ragn(
         n_batch,
         log_path,
         restore_from,
+        bidim_solution,
     )
 
     tr_acc = None
     val_acc = None
     asserted = False
     best_val_acc = best_val_acc_tf.numpy()
-    in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path)
+    in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path, bidim_solution)
     in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
     epoch_bar = tqdm(
         total=n_epoch + start_epoch, initial=start_epoch, desc="Processed Epochs"
@@ -253,7 +284,7 @@ def train_ragn(
                 "gpickle",
                 n_batch,
                 dataset_size=tr_size,
-                bidim_solution=False,
+                bidim_solution=bidim_solution,
                 shuffle=True,
                 random_state=random_state,
                 start_point=init_batch_tr,

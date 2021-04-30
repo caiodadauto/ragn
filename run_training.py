@@ -27,7 +27,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--tr-size",
         type=int,
-        default=500000,
+        default=1000000,
         help="Size of training dataset",
     )
     p.add_argument(
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-msg",
         type=int,
-        default=40,
+        default=20,
         help="Number of messages",
     )
     p.add_argument(
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-batch",
         type=int,
-        default=64,
+        default=128,
         help="Batch size",
     )
     p.add_argument(
@@ -78,9 +78,14 @@ if __name__ == "__main__":
         help="Start the debug running, the functions are not compiled",
     )
     p.add_argument(
+        "--bidim_solution",
+        action="store_true",
+        help="To use the outputs in one-hot vector format",
+    )
+    p.add_argument(
         "--seed",
         type=int,
-        default=12345,
+        default=2,
         help="Random seed",
     )
     p.add_argument(
@@ -98,7 +103,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--decay-steps",
         type=int,
-        default=70000,
+        default=100000,
         help="Number of steps to reach the final learning rate",
     )
     p.add_argument(
