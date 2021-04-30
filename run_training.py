@@ -78,7 +78,7 @@ if __name__ == "__main__":
         help="Start the debug running, the functions are not compiled",
     )
     p.add_argument(
-        "--bidim_solution",
+        "--bidim-solution",
         action="store_true",
         help="To use the outputs in one-hot vector format",
     )

@@ -93,7 +93,9 @@ def crossentropy_logists(expected, output_graphs, class_weight):
     for predicted_graphs in output_graphs:
         predicted = predicted_graphs.edges
         msg_loss = tf.compat.v1.losses.softmax_cross_entropy(
-            expected, predicted, tf.gather(class_weight, tf.cast(expected, tf.int32))
+            expected,
+            predicted,
+            tf.gather(class_weight, tf.cast(expected[:, 1] == 1, tf.int32)),
         )
         loss_for_all_msg.append(msg_loss)
     loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
