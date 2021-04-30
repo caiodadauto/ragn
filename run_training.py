@@ -94,6 +94,12 @@ if __name__ == "__main__":
         help="Optimizer",
     )
     p.add_argument(
+        "--sufix",
+        type=str,
+        default="",
+        help="Sufix name for log dir",
+    )
+    p.add_argument(
         "--seed",
         type=int,
         default=2,

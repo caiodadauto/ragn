@@ -235,10 +235,10 @@ class BiLocalRoutingNetwork(snt.Module):
 
             multhead_op1 = multi_model(edge_rec_pair, **kwargs)
             multhead_op2 = tf.multiply(attentions, multhead_op1)
-            multhead_op3 = tf.math.unsorted_segment_sum(
-                multhead_op2, graphs.senders, tf.reduce_sum(graphs.n_node)
-            )
-            multihead_routing.append(multhead_op3)
+            # multhead_op3 = tf.math.unsorted_segment_sum(
+            #     multhead_op2, graphs.senders, tf.reduce_sum(graphs.n_node)
+            # )
+            multihead_routing.append(multhead_op2)
         node_attention_feature = tf.concat(multihead_routing, -1)
         final_features = self._final_node_model(
             tf.concat(

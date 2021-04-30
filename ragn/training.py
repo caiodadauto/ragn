@@ -126,6 +126,7 @@ def set_environment(
     bidim_solution,
     opt,
     scale_edge,
+    sufix_name,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
@@ -157,7 +158,9 @@ def set_environment(
     else:
         logdir = os.path.join(log_path, restore_from)
         print("Restore training session from {}".format(logdir))
-    scalar_writer = tf.summary.create_file_writer(os.path.join(logdir + "/scalars"))
+    scalar_writer = tf.summary.create_file_writer(
+        os.path.join(logdir + "-" + sufix_name, "scalars")
+    )
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,
@@ -165,10 +168,10 @@ def set_environment(
         best_val_acc_tf=best_val_acc_tf,
     )
     last_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "last_ckpts"), max_to_keep=3
+        ckpt, os.path.join(logdir + "-" + sufix_name, "last_ckpts"), max_to_keep=3
     )
     best_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "best_ckpts"), max_to_keep=3
+        ckpt, os.path.join(logdir + "-" + sufix_name, "best_ckpts"), max_to_keep=3
     )
 
     tf.random.set_seed(seed)
@@ -221,6 +224,7 @@ def train_ragn(
     n_msg,
     n_epoch,
     n_batch,
+    sufix_name="",
     debug=False,
     seed=12345,
     init_lr=5e-3,
@@ -278,6 +282,7 @@ def train_ragn(
         bidim_solution,
         opt,
         scale_edge,
+        sufix_name,
     )
 
     tr_acc = None
