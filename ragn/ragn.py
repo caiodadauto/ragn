@@ -14,8 +14,8 @@ from graph_nets.blocks import (
 )
 
 
-NUM_LAYERS = 3
-LATENT_SIZE = 24
+NUM_LAYERS = 5
+LATENT_SIZE = 28
 
 
 def _compute_stacked_offsets(sizes, repeats):
