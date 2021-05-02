@@ -14,9 +14,9 @@ from graph_nets.blocks import (
 )
 
 
-NUM_LAYERS = 6
+NUM_LAYERS = 5
 LATENT_SIZE = 24
-
+RECURRENT_DEPTH = 3
 
 def _compute_stacked_offsets(sizes, repeats):
     sizes = tf.cast(tf.convert_to_tensor(sizes[:-1]), tf.int32)
@@ -140,12 +140,19 @@ class LeakyReluNormMLP(snt.Module):
 
 
 class LeakyReluNormLSTM(snt.Module):
-    def __init__(self, hidden_size, recurrent_dropout=0.25, name="LeakyReluNormLSTM"):
+    def __init__(
+        self, hidden_size, depth, recurrent_dropout=0.25, name="LeakyReluNormLSTM"
+    ):
         super(LeakyReluNormLSTM, self).__init__(name=name)
         self._hidden_size = hidden_size
-        self._dropout_lstm, self._lstm = snt.lstm_with_recurrent_dropout(
-            self._hidden_size, dropout=recurrent_dropout
-        )
+        tr_lstm = []
+        test_lstm = []
+        for _ in range(depth):
+            dropout_lstm, lstm = snt.lstm_with_recurrent_dropout(
+                self._hidden_size, dropout=recurrent_dropout
+            )
+            test_lstm.append(lstm)
+            tr_lstm.append(dropout_lstm)
         self._batch_norm = snt.BatchNorm(create_offset=True, create_scale=True)
 
     def initial_state(self, batch_size, is_training):
@@ -153,15 +160,14 @@ class LeakyReluNormLSTM(snt.Module):
             return self._dropout_lstm.initial_state(batch_size)
         else:
             init_states = self._lstm.initial_state(batch_size)
-            init_states = (init_states, [tf.ones_like(init_states[0], name="FoolMask")])
-            return init_states
+            return (init_states, )
 
     def __call__(self, inputs, prev_states, is_training):
         if is_training:
             outputs, next_states = self._dropout_lstm(inputs, prev_states)
         else:
             outputs, next_states = self._lstm(inputs, prev_states[0])
-            next_states = (next_states, [tf.ones_like(next_states[0], name="FoolMask")])
+            next_states = (next_states, )
 
         outputs = self._batch_norm(
             outputs, is_training=is_training, test_local_stats=True
@@ -170,8 +176,8 @@ class LeakyReluNormLSTM(snt.Module):
         return outputs, next_states
 
 
-def make_lstm_model(size=LATENT_SIZE):
-    return LeakyReluNormLSTM(size)
+def make_lstm_model(size=LATENT_SIZE, depth=RECURRENT_DEPTH):
+    return LeakyReluNormLSTM(size, depth)
 
 
 def make_mlp_model(size=LATENT_SIZE, n_layers=NUM_LAYERS, model=LeakyReluNormMLP):
@@ -228,7 +234,9 @@ class BiLocalRoutingNetwork(snt.Module):
                 -1,
                 keepdims=True,
             )
-            attention_input = tf.math.sigmoid(att_op)# tf.nn.leaky_relu(att_op, alpha=0.2)
+            attention_input = tf.math.sigmoid(
+                att_op
+            )  # tf.nn.leaky_relu(att_op, alpha=0.2)
             attentions = self._unsorted_segment_softmax(
                 attention_input, graphs.senders, tf.reduce_sum(graphs.n_node)
             )

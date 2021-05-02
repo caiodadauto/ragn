@@ -108,7 +108,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--init-lr",
         type=float,
-        default=1e-2,
+        default=5e-3,
         help="Initial learning rate",
     )
     p.add_argument(
