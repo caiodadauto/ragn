@@ -145,21 +145,21 @@ class LeakyReluNormLSTM(snt.Module):
     ):
         super(LeakyReluNormLSTM, self).__init__(name=name)
         self._hidden_size = hidden_size
-        tr_lstm = []
-        test_lstm = []
+        self.tr_lstm = []
+        self.test_lstm = []
         for _ in range(depth):
             dropout_lstm, lstm = snt.lstm_with_recurrent_dropout(
                 self._hidden_size, dropout=recurrent_dropout
             )
-            test_lstm.append(lstm)
-            tr_lstm.append(dropout_lstm)
+            self.test_lstm.append(lstm)
+            self.tr_lstm.append(dropout_lstm)
         self._batch_norm = snt.BatchNorm(create_offset=True, create_scale=True)
 
     def initial_state(self, batch_size, is_training):
         if is_training:
-            return self._dropout_lstm.initial_state(batch_size)
+            return self.tr_lstm.initial_state(batch_size)
         else:
-            init_states = self._lstm.initial_state(batch_size)
+            init_states = self.test_lstm.initial_state(batch_size)
             return (init_states, )
 
     def __call__(self, inputs, prev_states, is_training):
