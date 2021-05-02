@@ -166,9 +166,9 @@ class LeakyReluNormLSTM(snt.Module):
 
     def __call__(self, inputs, prev_states, is_training):
         if is_training:
-            outputs, next_states = self._dropout_lstm(inputs, prev_states)
+            outputs, next_states = self.tr_lstm(inputs, prev_states)
         else:
-            outputs, next_states = self._lstm(inputs, prev_states[0])
+            outputs, next_states = self.test_lstm(inputs, prev_states[0])
             next_states = (next_states, )
 
         outputs = self._batch_norm(
