@@ -57,7 +57,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-msg",
         type=int,
-        default=45,
+        default=55,
         help="Number of messages",
     )
     p.add_argument(
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--init-lr",
         type=float,
-        default=5e-3,
+        default=1e-2,
         help="Initial learning rate",
     )
     p.add_argument(
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--decay-steps",
         type=int,
-        default=80000,
+        default=90000,
         help="Number of steps to reach the final learning rate",
     )
     p.add_argument(
