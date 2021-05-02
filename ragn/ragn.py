@@ -14,8 +14,8 @@ from graph_nets.blocks import (
 )
 
 
-NUM_LAYERS = 5
-LATENT_SIZE = 24
+NUM_LAYERS = 6
+LATENT_SIZE = 32
 
 
 def _compute_stacked_offsets(sizes, repeats):
@@ -194,9 +194,9 @@ class BiLocalRoutingNetwork(snt.Module):
             self._multihead_models.append(
                 [
                     model_fn(model=LeakyReluMLP),
+                    model_fn(size=16, model=LeakyReluMLP),
+                    model_fn(size=16, model=LeakyReluMLP),
                     model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=8, model=LeakyReluMLP),
                 ]
             )
 
