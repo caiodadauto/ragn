@@ -155,7 +155,7 @@ def set_environment(
 
     if restore_from is None:
         logdir = os.path.join(
-            log_path, dt.now().strftime("%Y%m%d-%H%M%S"), "-" + sufix_name
+            log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
         )
     else:
         logdir = os.path.join(log_path, restore_from)
