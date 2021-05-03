@@ -100,6 +100,36 @@ if __name__ == "__main__":
         help="Sufix name for log dir",
     )
     p.add_argument(
+        "--msg-ratio",
+        type=float,
+        default=0.35,
+        help="Number of partial results from message passing that will be consider in loss function",
+    )
+    p.add_argument(
+        "--n-layers",
+        type=int,
+        default=5,
+        help="Number of layers of each MLP",
+    )
+    p.add_argument(
+        "--hidden-size",
+        type=int,
+        default=24,
+        help="The base for the number of neurons in the hidden layers for both MLP and LSTM",
+    )
+    p.add_argument(
+        "--rnn-depth",
+        type=int,
+        default=2,
+        help="The number of LSTM that will be concatenated",
+    )
+    p.add_argument(
+        "--n-heads",
+        type=int,
+        default=3,
+        help="The number of heads used to make the link decision",
+    )
+    p.add_argument(
         "--seed",
         type=int,
         default=2,

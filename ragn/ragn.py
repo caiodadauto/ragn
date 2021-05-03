@@ -2,6 +2,7 @@ import tree
 import numpy as np
 import sonnet as snt
 import tensorflow as tf
+from functools import partial
 
 from graph_nets import blocks
 from graph_nets import modules
@@ -13,10 +14,6 @@ from graph_nets.blocks import (
     broadcast_sender_nodes_to_edges,
 )
 
-
-NUM_LAYERS = 5
-LATENT_SIZE = 24
-RECURRENT_DEPTH = 2
 
 def _compute_stacked_offsets(sizes, repeats):
     sizes = tf.cast(tf.convert_to_tensor(sizes[:-1]), tf.int32)
@@ -162,14 +159,14 @@ class LeakyReluNormLSTM(snt.Module):
             return self.tr_lstm.initial_state(batch_size)
         else:
             init_states = self.test_lstm.initial_state(batch_size)
-            return (init_states, )
+            return (init_states,)
 
     def __call__(self, inputs, prev_states, is_training):
         if is_training:
             outputs, next_states = self.tr_lstm(inputs, prev_states)
         else:
             outputs, next_states = self.test_lstm(inputs, prev_states[0])
-            next_states = (next_states, )
+            next_states = (next_states,)
 
         outputs = self._batch_norm(
             outputs, is_training=is_training, test_local_stats=True
@@ -178,33 +175,54 @@ class LeakyReluNormLSTM(snt.Module):
         return outputs, next_states
 
 
-def make_lstm_model(size=LATENT_SIZE, depth=RECURRENT_DEPTH):
-    return LeakyReluNormLSTM(size, depth)
+def make_lstm_model(hidden_size, depth):
+    return LeakyReluNormLSTM(hidden_size, depth)
 
 
-def make_mlp_model(size=LATENT_SIZE, n_layers=NUM_LAYERS, model=LeakyReluNormMLP):
-    return model(size, n_layers)
+def make_mlp_model(hidden_size, n_layers, model):
+    return model(hidden_size, n_layers)
+
+    def __init__(
+        self,
+        hidden_size=24,
+        n_layers=5,
+        model=LeakyReluNormMLP,
+        name="MLPGraphIndependent",
+    ):
+        super(MLPGraphIndependent, self).__init__(name=name)
+        self._network = modules.GraphIndependent(
+            edge_model_fn=partial(
+                make_mlp_model, hidden_size=hidden_size, n_layers=n_layers, model=model
+            ),
+            node_model_fn=partial(
+                make_mlp_model, hidden_size=hidden_size, n_layers=n_layers, model=model
+            ),
+            global_model_fn=None,
+        )
 
 
 class BiLocalRoutingNetwork(snt.Module):
     def __init__(
         self,
-        model_fn=make_mlp_model,
+        hidden_size=24,
+        n_layers=5,
+        model=LeakyReluMLP,
         n_heads=3,
         name="BiLocalRoutingNetwork",
     ):
         super(BiLocalRoutingNetwork, self).__init__(name=name)
+        model_fn = partial(make_mlp_model, n_layers=n_layers, model=model)
         self._multihead_models = []
         self._routing_layer = snt.Linear(2)
-        self._final_node_model = model_fn(model=LeakyReluMLP)
-        self._final_query_model = model_fn(model=LeakyReluMLP)
+        self._final_node_model = model_fn(hidden_size=hidden_size)
+        self._final_query_model = model_fn(hidden_size=hidden_size)
         for _ in range(n_heads):
             self._multihead_models.append(
                 [
-                    model_fn(model=LeakyReluMLP),
-                    model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=8, model=LeakyReluMLP),
+                    model_fn(hidden_size=hidden_size),
+                    model_fn(hidden_size=(hidden_size // 2)),
+                    model_fn(hidden_size=(hidden_size - (hidden_size // 2))),
+                    model_fn(hidden_size=8),
                 ]
             )
 
@@ -264,22 +282,25 @@ class BiLocalRoutingNetwork(snt.Module):
 class OneLocalRoutingNetwork(snt.Module):
     def __init__(
         self,
-        model_fn=make_mlp_model,
+        hidden_size=24,
+        n_layers=5,
+        model=LeakyReluMLP,
         n_heads=3,
         name="OneLocalRoutingNetwork",
     ):
         super(OneLocalRoutingNetwork, self).__init__(name=name)
+        model_fn = partial(make_mlp_model, n_layers=n_layers, model=model)
         self._multihead_models = []
         self._routing_layer = snt.Linear(1)
-        self._final_node_model = model_fn(model=LeakyReluMLP)
-        self._final_query_model = model_fn(model=LeakyReluMLP)
+        self._final_node_model = model_fn(hidden_size=hidden_size)
+        self._final_query_model = model_fn(hidden_size=hidden_size)
         for _ in range(n_heads):
             self._multihead_models.append(
                 [
-                    model_fn(model=LeakyReluMLP),
-                    model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=12, model=LeakyReluMLP),
-                    model_fn(size=8, model=LeakyReluMLP),
+                    model_fn(hidden_size=hidden_size),
+                    model_fn(hidden_size=(hidden_size // 2)),
+                    model_fn(hidden_size=(hidden_size - (hidden_size // 2))),
+                    model_fn(hidden_size=8),
                 ]
             )
 
@@ -341,11 +362,21 @@ class OneLocalRoutingNetwork(snt.Module):
 
 
 class MLPGraphIndependent(snt.Module):
-    def __init__(self, name="MLPGraphIndependent"):
+    def __init__(
+        self,
+        hidden_size=24,
+        n_layers=5,
+        model=LeakyReluNormMLP,
+        name="MLPGraphIndependent",
+    ):
         super(MLPGraphIndependent, self).__init__(name=name)
         self._network = modules.GraphIndependent(
-            edge_model_fn=make_mlp_model,
-            node_model_fn=make_mlp_model,
+            edge_model_fn=partial(
+                make_mlp_model, hidden_size=hidden_size, n_layers=n_layers, model=model
+            ),
+            node_model_fn=partial(
+                make_mlp_model, hidden_size=hidden_size, n_layers=n_layers, model=model
+            ),
             global_model_fn=None,
         )
 
@@ -400,12 +431,15 @@ class NeighborhoodAggregator(snt.Module):
 class GraphRecurrentNonLocalNetwork(snt.Module):
     def __init__(
         self,
-        recurrent_model_fn=make_lstm_model,
+        hidden_size=24,
+        depth=2,
         reducer=tf.math.unsorted_segment_sum,
         name="GraphRecurrentNonLocalNetwork",
     ):
         super(GraphRecurrentNonLocalNetwork, self).__init__(name=name)
-
+        recurrent_model_fn = partial(
+            make_lstm_model, hidden_size=hidden_size, depth=depth
+        )
         self._edge_block = blocks.RecurrentEdgeBlock(
             edge_recurrent_model_fn=recurrent_model_fn,
             use_edges=True,
@@ -463,12 +497,29 @@ class GraphRecurrentNonLocalNetwork(snt.Module):
         return out_graphs
 
 
-class EncodeProcessDecode(snt.Module):
-    def __init__(self, lookup_fn=OneLocalRoutingNetwork, name="EncodeProcessDecode"):
-        super(EncodeProcessDecode, self).__init__(name=name)
-        self._encoder = MLPGraphIndependent()
-        self._lookup = lookup_fn()
-        self._core = GraphRecurrentNonLocalNetwork()
+class RAGN(snt.Module):
+    def __init__(
+        self,
+        hidden_size=24,
+        n_layers=5,
+        rnn_depth=2,
+        n_heads=3,
+        bidim=True,
+        name="RAGN",
+    ):
+        super(RAGN, self).__init__(name=name)
+        self._encoder = MLPGraphIndependent(hidden_size=hidden_size, n_layers=n_layers)
+        self._core = GraphRecurrentNonLocalNetwork(
+            hidden_size=hidden_size, depth=rnn_depth
+        )
+        if bidim:
+            self._lookup = BiLocalRoutingNetwork(
+                hidden_size=hidden_size, n_layers=n_layers, n_heads=n_heads
+            )
+        else:
+            self._lookup = OneLocalRoutingNetwork(
+                hidden_size=hidden_size, n_layers=n_layers, n_heads=n_heads
+            )
 
     def __call__(self, graphs, num_processing_steps, is_training):
         out_graphs = []

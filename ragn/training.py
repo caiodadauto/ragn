@@ -5,15 +5,16 @@ from datetime import datetime as dt
 import numpy as np
 import networkx as nx
 import tensorflow as tf
+import tensorflow.summary as summary
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.preprocessing import minmax_scale
+from tensorboard.plugins.hparams import api as hp
 
 import pytop
 from tqdm import tqdm
 from graph_nets import utils_np, utils_tf
 
-# from draw import draw_revertion
-from ragn.ragn import EncodeProcessDecode, BiLocalRoutingNetwork, OneLocalRoutingNetwork
+from ragn.ragn import RAGN
 
 
 def networkxs_to_graphs_tuple(
@@ -85,9 +86,10 @@ def bi_get_accuracy(predicted, expected):
     return balanced_accuracy_score(e, p)
 
 
-def binary_crossentropy(expected, output_graphs, class_weight, ratio=1.0):
+def binary_crossentropy(expected, output_graphs, class_weight, ratio):
     loss_for_all_msg = []
-    for predicted_graphs in output_graphs:
+    start_idx = int(np.ceil(len(output_graphs) * ratio))
+    for predicted_graphs in output_graphs[start_idx:]:
         predicted = predicted_graphs.edges
         msg_losses = tf.keras.losses.binary_crossentropy(expected, predicted)
         msg_losses = tf.gather(class_weight, tf.cast(expected, tf.int32)) * msg_losses
@@ -98,9 +100,9 @@ def binary_crossentropy(expected, output_graphs, class_weight, ratio=1.0):
     return loss
 
 
-def crossentropy_logists(expected, output_graphs, class_weight, ratio=0.35):
-    start_idx = int(np.ceil(len(output_graphs) * ratio))
+def crossentropy_logists(expected, output_graphs, class_weight, ratio):
     loss_for_all_msg = []
+    start_idx = int(np.ceil(len(output_graphs) * ratio))
     for predicted_graphs in output_graphs[start_idx:]:
         predicted = predicted_graphs.edges
         msg_loss = tf.compat.v1.losses.softmax_cross_entropy(
@@ -114,6 +116,11 @@ def crossentropy_logists(expected, output_graphs, class_weight, ratio=0.35):
     return loss
 
 
+def save_hp(base_dir, **kwargs):
+    with summary.create_file_writer(base_dir).as_default():
+        hp.hparams(kwargs)
+
+
 def set_environment(
     tr_size,
     init_lr,
@@ -122,12 +129,21 @@ def set_environment(
     power,
     seed,
     n_batch,
+    n_layers,
+    hidden_size,
+    rnn_depth,
+    n_heads,
     log_path,
     restore_from,
     bidim_solution,
     opt,
     scale_edge,
     sufix_name,
+    n_msg,
+    n_epoch,
+    delta_time_to_validate,
+    class_weight,
+    msg_ratio,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
@@ -136,12 +152,18 @@ def set_environment(
         scaler = minmax_scale
     else:
         scaler = None
+
+    model = RAGN(
+        hidden_size=hidden_size,
+        n_layers=n_layers,
+        rnn_depth=rnn_depth,
+        n_heads=n_heads,
+        bidim=bidim_solution,
+    )
     if bidim_solution:
         loss_fn = crossentropy_logists
-        model = EncodeProcessDecode(lookup_fn=BiLocalRoutingNetwork)
     else:
         loss_fn = binary_crossentropy
-        model = EncodeProcessDecode(lookup=OneLocalRoutingNetwork)
     lr = tf.compat.v1.train.polynomial_decay(
         init_lr,
         global_step,
@@ -155,13 +177,31 @@ def set_environment(
         optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
     if restore_from is None:
-        logdir = os.path.join(
+        log_dir = os.path.join(
             log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
         )
+        save_hp(
+            log_dir,
+            tr_size=tr_size,
+            n_msg=n_msg,
+            n_epoch=n_epoch,
+            n_batch=n_batch,
+            seed=seed,
+            init_lr=init_lr,
+            end_lr=end_lr,
+            decay_steps=decay_steps,
+            power=power,
+            delta_time_to_validate=delta_time_to_validate,
+            class_weight="{:.2f},{:.2f}".format(class_weight[0], class_weight[1]),
+            bidim_solution=bidim_solution,
+            opt=opt,
+            scale_edge=scale_edge,
+            msg_ratio=msg_ratio,
+        )
     else:
-        logdir = os.path.join(log_path, restore_from)
-        print("Restore training session from {}".format(logdir))
-    scalar_writer = tf.summary.create_file_writer(os.path.join(logdir, "scalars"))
+        log_dir = os.path.join(log_path, restore_from)
+        print("Restore training session from {}".format(log_dir))
+    scalar_writer = tf.summary.create_file_writer(os.path.join(log_dir, "scalars"))
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,
@@ -169,22 +209,22 @@ def set_environment(
         best_val_acc_tf=best_val_acc_tf,
     )
     last_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "last_ckpts"), max_to_keep=3
+        ckpt, os.path.join(log_dir, "last_ckpts"), max_to_keep=3
     )
     best_ckpt_manager = tf.train.CheckpointManager(
-        ckpt, os.path.join(logdir, "best_ckpts"), max_to_keep=3
+        ckpt, os.path.join(log_dir, "best_ckpts"), max_to_keep=3
     )
 
     tf.random.set_seed(seed)
     random_state = np.random.RandomState(seed=seed)
     if restore_from is None:
-        with open(os.path.join(logdir, "sb.csv"), "w") as f:
+        with open(os.path.join(log_dir, "sb.csv"), "w") as f:
             f.write("{}, {}\n".format(seed, n_batch))
         start_epoch = 0
         init_batch_tr = 1
         status = None
     else:
-        with open(os.path.join(logdir, "sb.csv"), "r") as f:
+        with open(os.path.join(log_dir, "sb.csv"), "r") as f:
             seed, n_batch = list(
                 map(lambda s: int(s), f.readline().rstrip().split(","))
             )
@@ -225,6 +265,10 @@ def train_ragn(
     n_msg,
     n_epoch,
     n_batch,
+    n_layers,
+    hidden_size,
+    rnn_depth,
+    n_heads,
     sufix_name="",
     debug=False,
     seed=12345,
@@ -238,6 +282,7 @@ def train_ragn(
     bidim_solution=False,
     opt="adam",
     scale_edge=False,
+    msg_ratio=1.0,
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -247,7 +292,7 @@ def train_ragn(
         expected = gt_graphs.edges
         with tf.GradientTape() as tape:
             output_graphs = model(in_graphs, n_msg, is_training=True)
-            loss = loss_fn(expected, output_graphs, class_weight)
+            loss = loss_fn(expected, output_graphs, class_weight, msg_ratio)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(
             zip(gradients, model.trainable_variables), global_step=global_step
@@ -278,12 +323,21 @@ def train_ragn(
         power,
         seed,
         n_batch,
+        n_layers,
+        hidden_size,
+        rnn_depth,
+        n_heads,
         log_path,
         restore_from,
         bidim_solution,
         opt,
         scale_edge,
         sufix_name,
+        n_msg,
+        n_epoch,
+        delta_time_to_validate,
+        class_weight,
+        msg_ratio,
     )
 
     tr_acc = None
