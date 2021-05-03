@@ -16,7 +16,7 @@ from graph_nets.blocks import (
 
 NUM_LAYERS = 5
 LATENT_SIZE = 24
-RECURRENT_DEPTH = 3
+RECURRENT_DEPTH = 2
 
 def _compute_stacked_offsets(sizes, repeats):
     sizes = tf.cast(tf.convert_to_tensor(sizes[:-1]), tf.int32)

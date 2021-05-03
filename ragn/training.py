@@ -85,7 +85,7 @@ def bi_get_accuracy(predicted, expected):
     return balanced_accuracy_score(e, p)
 
 
-def binary_crossentropy(expected, output_graphs, class_weight):
+def binary_crossentropy(expected, output_graphs, class_weight, ratio=1.0):
     loss_for_all_msg = []
     for predicted_graphs in output_graphs:
         predicted = predicted_graphs.edges
@@ -98,9 +98,10 @@ def binary_crossentropy(expected, output_graphs, class_weight):
     return loss
 
 
-def crossentropy_logists(expected, output_graphs, class_weight):
+def crossentropy_logists(expected, output_graphs, class_weight, ratio=0.35):
+    start_idx = int(np.ceil(len(output_graphs) * ratio))
     loss_for_all_msg = []
-    for predicted_graphs in output_graphs:
+    for predicted_graphs in output_graphs[start_idx:]:
         predicted = predicted_graphs.edges
         msg_loss = tf.compat.v1.losses.softmax_cross_entropy(
             expected,
@@ -160,9 +161,7 @@ def set_environment(
     else:
         logdir = os.path.join(log_path, restore_from)
         print("Restore training session from {}".format(logdir))
-    scalar_writer = tf.summary.create_file_writer(
-        os.path.join(logdir, "scalars")
-    )
+    scalar_writer = tf.summary.create_file_writer(os.path.join(logdir, "scalars"))
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,

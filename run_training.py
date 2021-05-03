@@ -120,7 +120,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--decay-steps",
         type=int,
-        default=90000,
+        default=45000,
         help="Number of steps to reach the final learning rate",
     )
     p.add_argument(
