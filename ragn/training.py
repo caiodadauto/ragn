@@ -354,9 +354,10 @@ def train_ragn(
                 last_ckpt_manager.save()
                 if best_val_acc <= val_acc:
                     best_ckpt_manager.save()
-                    best_val_acc_tf.assign(best_val_acc)
+                    best_val_acc_tf.assign(val_acc)
+                    best_val_acc = val_acc
             batch_bar.update(in_graphs.n_node.shape[0])
             batch_bar.set_postfix(loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
         epoch_bar.update()
-        epoch_bar.set_postfix(loss=loss, best_val_acc=best_val_acc)
+        epoch_bar.set_postfix(loss=loss.numpy(), best_val_acc=best_val_acc)
     epoch_bar.close()
