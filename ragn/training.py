@@ -177,9 +177,12 @@ def set_environment(
         optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
     if restore_from is None:
-        log_dir = os.path.join(
-            log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
-        )
+        if sufix_name:
+            log_dir = os.path.join(
+                log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
+            )
+        else:
+            log_dir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
         save_hp(
             log_dir,
             tr_size=tr_size,
@@ -197,6 +200,10 @@ def set_environment(
             opt=opt,
             scale_edge=scale_edge,
             msg_ratio=msg_ratio,
+            n_layers=n_layers,
+            hidden_size=hidden_size,
+            rnn_depth=rnn_depth,
+            n_heads=n_heads,
         )
     else:
         log_dir = os.path.join(log_path, restore_from)
