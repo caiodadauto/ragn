@@ -255,7 +255,7 @@ class BiLocalRoutingNetwork(snt.Module):
                 keepdims=True,
             )
             attention_input = tf.math.sigmoid(
-                att_op / tf.math.sqrt(enc_queries.shape[-1])
+                att_op / tf.math.sqrt(tf.cast(enc_queries.shape[-1], tf.float32))
             )  # tf.nn.leaky_relu(att_op, alpha=0.2)
             attentions = self._unsorted_segment_softmax(
                 attention_input, graphs.senders, tf.reduce_sum(graphs.n_node)
