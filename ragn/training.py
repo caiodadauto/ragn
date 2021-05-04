@@ -65,8 +65,8 @@ def get_signatures(in_graphs, gt_graphs):
     return in_signature, gt_signature
 
 
-def log_scalars(writer, params, step):
-    with writer.as_default():
+def log_scalars(log_dir, params, step):
+    with tf.summary.create_file_writer(os.path.join(log_dir, "scalars")).as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
 
@@ -208,7 +208,6 @@ def set_environment(
     else:
         log_dir = os.path.join(log_path, restore_from)
         print("Restore training session from {}".format(log_dir))
-    scalar_writer = tf.summary.create_file_writer(os.path.join(log_dir, "scalars"))
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,
@@ -246,6 +245,7 @@ def set_environment(
             else:
                 init_batch_tr = global_step.numpy()
     return (
+        log_dir,
         model,
         lr,
         loss_fn,
@@ -255,7 +255,6 @@ def set_environment(
         best_val_acc_tf,
         start_epoch,
         init_batch_tr,
-        scalar_writer,
         last_ckpt_manager,
         best_ckpt_manager,
         random_state,
@@ -307,6 +306,7 @@ def train_ragn(
         return output_graphs[-1], loss
 
     (
+        log_dir,
         model,
         lr,
         loss_fn,
@@ -391,11 +391,6 @@ def train_ragn(
             if not asserted and status is not None:
                 status.assert_consumed()
                 asserted = True
-            log_scalars(
-                scalar_writer,
-                {"loss": loss.numpy(), "learning rate": lr().numpy()},
-                global_step.numpy(),
-            )
             delta_time = time() - last_validation
             if delta_time >= delta_time_to_validate:
                 out_val_graphs = eval(in_val_graphs)
@@ -407,9 +402,14 @@ def train_ragn(
                     tr_acc = get_accuracy(out_tr_graphs.edges, gt_graphs.edges)
                     val_acc = get_accuracy(out_val_graphs.edges, gt_val_graphs.edges)
                 log_scalars(
-                    scalar_writer,
-                    {"train accuracy": tr_acc, "val accuracy": val_acc},
-                    global_step,
+                    log_dir,
+                    {
+                        "loss": loss.numpy(),
+                        "learning rate": lr().numpy(),
+                        "train accuracy": tr_acc,
+                        "val accuracy": val_acc,
+                    },
+                    global_step.numpy(),
                 )
                 last_ckpt_manager.save()
                 if best_val_acc <= val_acc:
