@@ -316,7 +316,6 @@ def train_ragn(
         best_val_acc_tf,
         start_epoch,
         init_batch_tr,
-        scalar_writer,
         last_ckpt_manager,
         best_ckpt_manager,
         random_state,
