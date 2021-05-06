@@ -2,17 +2,43 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from metrics import compute_accuracy, aggregator_path_metrics
+
+def draw_acc(accs):
+    sns.set_style("ticks")
+    fig = plt.figure(dpi=300)
+    ax = fig.subplots(1, 1, sharey=False)
+    sns.histplot(
+        accs,
+        ax=ax,
+        # bins=5,
+        kde=True,
+        cumulative=True,
+        stat="density",
+        binrange=(0, 1),
+        label=r"Brite, {} = {:.3f}".format(r"$\overline{ACC}$", accs.mean()),
+        kde_kws=dict(cumulative=True),
+    )
+    ax.set_xlabel(r"ACC")
+    ax.set_ylabel("Cumulative Frequency")
+    ax.legend()
+    ax.set_yticks(np.arange(0, 1.25, .25))
+    ax.yaxis.grid(True)
+    fig.tight_layout()
+    plt.show()
+    fig.clear()
+    plt.close()
 
 
-def draw_revertion(steady_values, transient_values, top_type):
+def draw_revertion(steady_values, transient_values):
     dists_steady = {}
     dists_transient = {}
     dists_steady[r"$\sigma_c$"] = steady_values["cost"]
     dists_transient[r"$\sigma_c$"] = transient_values["cost"]
     dists_steady[r"$\sigma_l$"] = steady_values["hops"]
     dists_transient[r"$\sigma_l$"] = transient_values["hops"]
-    for (k, v_steady), (_, v_transient) in zip(dists_steady.items(), dists_transient.items()):
+    for (k, v_steady), (_, v_transient) in zip(
+        dists_steady.items(), dists_transient.items()
+    ):
         fig = plt.figure(dpi=300)
         ax = fig.subplots(1, 1, sharey=False)
         if k == r"$\pi$":
@@ -52,7 +78,6 @@ def draw_revertion(steady_values, transient_values, top_type):
                 ),
                 label="Transient, {} = {:.3f}".format(lmean, v_transient.mean()),
             )
-            # ax.set_xlim(0, 2.55)
         elif k == r"$\pi$":
             bins = np.histogram_bin_edges(v_steady, bins="auto")
             sns.distplot(
@@ -61,7 +86,9 @@ def draw_revertion(steady_values, transient_values, top_type):
                 bins=bins,
                 kde=False,
                 hist_kws=dict(
-                    zorder=1, weights=np.full(len(v_steady), 1 / len(v_steady)), range=(0, 1)
+                    zorder=1,
+                    weights=np.full(len(v_steady), 1 / len(v_steady)),
+                    range=(0, 1),
                 ),
                 label="Brite, {} = {:.3f}".format(lmean, v_steady.mean()),
             )
@@ -87,7 +114,9 @@ def draw_revertion(steady_values, transient_values, top_type):
                 bins=10,
                 kde=False,
                 hist_kws=dict(
-                    zorder=1, weights=np.full(len(v_steady), 1 / len(v_steady)), range=(0, 1)
+                    zorder=1,
+                    weights=np.full(len(v_steady), 1 / len(v_steady)),
+                    range=(0, 1),
                 ),
                 label="Steady State, {} = {:.3f}".format(lmean, v_steady.mean()),
             )
@@ -120,6 +149,6 @@ def draw_revertion(steady_values, transient_values, top_type):
         ax.tick_params(axis="x", labelsize=14)
         ax.tick_params(axis="y", labelsize=14)
         fig.tight_layout()
-        plt.savefig(file_name + "_" + top_type + ".pdf", transparent=True)
+        plt.savefig(file_name + ".pdf", transparent=True)
         fig.clear()
         plt.close()
