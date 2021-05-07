@@ -347,13 +347,23 @@ def train_ragn(
                     )
                 # log_scalars(
                 #     scalar_writer,
-                #     {"train accuracy": tr_acc, "val accuracy": val_acc},
-                #     global_step,
+                #    {
+                #        "loss": loss.numpy(),
+                #        "learning rate": lr().numpy(),
+                #        "train accuracy": tr_acc,
+                #        "val accuracy": val_acc,
+                #    },
+                #    global_step.numpy(),
                 # )
                 log_scalars(
-                    os.path.join(log_dir, "scalars"),
-                    {"train accuracy": tr_acc, "val accuracy": val_acc},
-                    global_step,
+                    log_dir,
+                    {
+                        "loss": loss.numpy(),
+                        "learning rate": lr().numpy(),
+                        "train accuracy": tr_acc,
+                        "val accuracy": val_acc,
+                    },
+                    global_step.numpy(),
                 )
                 last_ckpt_manager.save()
                 if best_val_acc <= val_acc:
