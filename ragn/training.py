@@ -27,7 +27,7 @@ def log_scalars(writer, params, step):
     with writer.as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
-    writer.flush()
+        writer.flush()
 
 
 def save_hp(base_dir, **kwargs):
