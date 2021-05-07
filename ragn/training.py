@@ -47,6 +47,9 @@ def set_environment(
     hidden_size,
     rnn_depth,
     n_heads,
+    n_att,
+    create_offset,
+    create_scale,
     log_path,
     restore_from,
     bidim_solution,
@@ -72,6 +75,9 @@ def set_environment(
         n_layers=n_layers,
         rnn_depth=rnn_depth,
         n_heads=n_heads,
+        n_att=n_att,
+        create_offset=create_offset,
+        create_scale=create_scale,
         bidim=bidim_solution,
     )
     if bidim_solution:
@@ -118,6 +124,9 @@ def set_environment(
             hidden_size=hidden_size,
             rnn_depth=rnn_depth,
             n_heads=n_heads,
+            n_att=n_att,
+            create_offset=create_offset,
+            create_scale=create_scale,
         )
     else:
         log_dir = os.path.join(log_path, restore_from)
@@ -190,6 +199,9 @@ def train_ragn(
     hidden_size,
     rnn_depth,
     n_heads,
+    n_att,
+    create_offset,
+    create_scale,
     sufix_name="",
     debug=False,
     seed=12345,
@@ -248,6 +260,9 @@ def train_ragn(
         hidden_size,
         rnn_depth,
         n_heads,
+        n_att,
+        create_offset,
+        create_scale,
         log_path,
         restore_from,
         bidim_solution,

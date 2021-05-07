@@ -108,7 +108,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-layers",
         type=int,
-        default=5,
+        default=3,
         help="Number of layers of each MLP",
     )
     p.add_argument(
@@ -126,8 +126,24 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-heads",
         type=int,
-        default=3,
+        default=4,
         help="The number of heads used to make the link decision",
+    )
+    p.add_argument(
+        "--n-att",
+        type=int,
+        default=3,
+        help="Number of multihead attention will be used to make the link decision",
+    )
+    p.add_argument(
+        "--create-offset",
+        action="store_true",
+        help="Create offset trainable parameter in the layer normalization",
+    )
+    p.add_argument(
+        "--create-scale",
+        action="store_true",
+        help="Create scale trainable parameter in the layer normalization",
     )
     p.add_argument(
         "--seed",

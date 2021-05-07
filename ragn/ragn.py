@@ -178,12 +178,12 @@ class LeakyReluNormLSTM(snt.Module):
 class RoutingMultiHeadAtt(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        n_layers=5,
-        model=LeakyReluMLP,
-        n_heads=3,
+        hidden_size,
+        n_layers,
+        n_heads,
         create_scale=True,
         create_offset=True,
+        model=LeakyReluMLP,
         name="RoutingTransformer",
     ):
         super(RoutingMultiHeadAtt, self).__init__(name=name)
@@ -211,22 +211,30 @@ class RoutingMultiHeadAtt(snt.Module):
         op4 = tf.divide(op1, op3)
         return op4
 
-    def call(self, destination, senders, edge, receivers, n_node, **kwargs):
+    def __call__(
+        self,
+        destination,
+        sender_features,
+        edge_features,
+        receiver_features,
+        senders,
+        n_node,
+        **kwargs,
+    ):
         # Query >  F(queries)
         # Key > concat(P(senders), Q(concat(edge, receivers)))
         # Value > W(concat(edge, receivers))
         multihead = []
-        edge_receivers = tf.concat([edge, receivers], -1)
+        edge_receivers = tf.concat([edge_features, receiver_features], -1)
         for (
             query_model,
             key_model,
             value_model,
-            encoder,
         ) in self._multihead_models:
             query = query_model(destination, **kwargs)
             key = tf.concat(
                 [
-                    key_model[0](senders, **kwargs),
+                    key_model[0](sender_features, **kwargs),
                     key_model[1](edge_receivers, **kwargs),
                 ],
                 -1,
@@ -239,8 +247,8 @@ class RoutingMultiHeadAtt(snt.Module):
                 att, senders, tf.reduce_sum(n_node)
             )
             multihead.append(tf.multiply(norm_att, value))
-        encoded_multihead = self._encoder(tf.concat(multihead, -1))
-        encoded_residual_multihead = tf.add(edge, encoded_multihead)
+        encoded_multihead = self._encoder(tf.concat(multihead, -1), **kwargs)
+        encoded_residual_multihead = tf.add(edge_features, encoded_multihead)
         return self._layer_norm(encoded_residual_multihead)
 
 
@@ -249,10 +257,10 @@ def make_lstm_model(hidden_size, depth):
 
 
 def make_multihead_att(
-    hidden_size, n_layers, model, n_heads, create_scale, create_offset
+    hidden_size, n_layers, n_heads, create_scale, create_offset, model
 ):
     return RoutingMultiHeadAtt(
-        hidden_size, n_layers, model, n_heads, create_scale, create_offset
+        hidden_size, n_layers, n_heads, create_scale, create_offset, model
     )
 
 
@@ -263,13 +271,13 @@ def make_mlp_model(hidden_size, n_layers, model):
 class BiLocalRoutingNetwork(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        n_layers=5,
+        hidden_size,
+        n_layers,
+        n_heads,
+        n_att,
+        create_scale,
+        create_offset,
         model=LeakyReluMLP,
-        n_heads=3,
-        n_att=3,
-        create_scale=True,
-        create_offset=True,
         name="BiLocalRoutingNetwork",
     ):
         super(BiLocalRoutingNetwork, self).__init__(name=name)
@@ -283,7 +291,7 @@ class BiLocalRoutingNetwork(snt.Module):
         for _ in range(n_att):
             self._att_models.append(
                 make_multihead_att(
-                    hidden_size, n_layers, model, n_heads, create_scale, create_offset
+                    hidden_size, n_layers, n_heads, create_scale, create_offset, model
                 )
             )
 
@@ -292,6 +300,7 @@ class BiLocalRoutingNetwork(snt.Module):
         sender_features = tf.gather(graphs.nodes, graphs.senders)
         receiver_features = tf.gather(graphs.nodes, graphs.receivers)
         edge_features = graphs.edges
+        senders = graphs.senders
         n_node = graphs.n_node
         for multihead_att_model in self._att_models:
             edge_features = multihead_att_model(
@@ -299,19 +308,20 @@ class BiLocalRoutingNetwork(snt.Module):
                 sender_features,
                 edge_features,
                 receiver_features,
+                senders,
                 n_node,
                 **kwargs,
             )
-        return graphs.replace(edges=self._link_decision(edge_features))
+        return graphs.replace(edges=self._link_decision(edge_features, **kwargs))
 
 
 class OneLocalRoutingNetwork(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        n_layers=5,
+        hidden_size,
+        n_layers,
+        n_heads,
         model=LeakyReluMLP,
-        n_heads=3,
         name="OneLocalRoutingNetwork",
     ):
         super(OneLocalRoutingNetwork, self).__init__(name=name)
@@ -390,8 +400,8 @@ class OneLocalRoutingNetwork(snt.Module):
 class MLPGraphIndependent(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        n_layers=5,
+        hidden_size,
+        n_layers,
         model=LeakyReluNormMLP,
         name="MLPGraphIndependent",
     ):
@@ -457,8 +467,8 @@ class NeighborhoodAggregator(snt.Module):
 class GraphRecurrentNonLocalNetwork(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        depth=2,
+        hidden_size,
+        depth,
         reducer=tf.math.unsorted_segment_sum,
         name="GraphRecurrentNonLocalNetwork",
     ):
@@ -526,11 +536,14 @@ class GraphRecurrentNonLocalNetwork(snt.Module):
 class RAGN(snt.Module):
     def __init__(
         self,
-        hidden_size=24,
-        n_layers=5,
-        rnn_depth=2,
-        n_heads=3,
+        hidden_size,
+        n_layers,
+        rnn_depth,
+        n_heads,
+        n_att,
         bidim=True,
+        create_offset=True,
+        create_scale=True,
         name="RAGN",
     ):
         super(RAGN, self).__init__(name=name)
@@ -540,7 +553,12 @@ class RAGN(snt.Module):
         )
         if bidim:
             self._lookup = BiLocalRoutingNetwork(
-                hidden_size=hidden_size, n_layers=n_layers, n_heads=n_heads
+                hidden_size=hidden_size,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                n_att=n_att,
+                create_offset=create_offset,
+                create_scale=create_scale,
             )
         else:
             self._lookup = OneLocalRoutingNetwork(
