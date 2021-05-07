@@ -23,14 +23,16 @@ from ragn.utils import (
 )
 
 
-def log_scalars(writer, params, step):
-    with writer.as_default():
+# def log_scalars(writer, params, step):
+#     with writer.as_default():
+#         for name, value in params.items():
+#             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
+#     tf.summary.flush(writer)
+
+def log_scalars(path, params, step):
+    with tf.summary.create_file_writer(path).as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
-        print()
-        print("MAKE THE FLUSH")
-        print()
-    tf.summary.flush(writer)
 
 
 def save_hp(base_dir, **kwargs):
@@ -134,7 +136,7 @@ def set_environment(
     else:
         log_dir = os.path.join(log_path, restore_from)
         print("Restore training session from {}".format(log_dir))
-    scalar_writer = tf.summary.create_file_writer(os.path.join(log_dir, "scalars"))
+    # scalar_writer = tf.summary.create_file_writer(os.path.join(log_dir, "scalars"))
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,
@@ -181,7 +183,8 @@ def set_environment(
         best_val_acc_tf,
         start_epoch,
         init_batch_tr,
-        scalar_writer,
+        # scalar_writer,
+        log_dir,
         last_ckpt_manager,
         best_ckpt_manager,
         random_state,
@@ -245,7 +248,8 @@ def train_ragn(
         best_val_acc_tf,
         start_epoch,
         init_batch_tr,
-        scalar_writer,
+        # scalar_writer,
+        log_dir,
         last_ckpt_manager,
         best_ckpt_manager,
         random_state,
@@ -341,8 +345,13 @@ def train_ragn(
                     val_acc = get_accuracy(
                         out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy()
                     )
+                # log_scalars(
+                #     scalar_writer,
+                #     {"train accuracy": tr_acc, "val accuracy": val_acc},
+                #     global_step,
+                # )
                 log_scalars(
-                    scalar_writer,
+                    os.path.join(log_dir, "scalars"),
                     {"train accuracy": tr_acc, "val accuracy": val_acc},
                     global_step,
                 )
