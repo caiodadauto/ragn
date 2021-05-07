@@ -30,7 +30,7 @@ def log_scalars(writer, params, step):
         print()
         print("MAKE THE FLUSH")
         print()
-        writer.flush()
+    tf.summary.flush(writer)
 
 
 def save_hp(base_dir, **kwargs):
