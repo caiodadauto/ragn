@@ -29,6 +29,7 @@ from ragn.utils import (
 #             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
 #     tf.summary.flush(writer)
 
+
 def log_scalars(path, params, step):
     with tf.summary.create_file_writer(path).as_default():
         for name, value in params.items():
@@ -193,6 +194,31 @@ def set_environment(
     )
 
 
+def init_training_generator(
+    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, init_batch_tr=1
+):
+    batch_bar = tqdm(
+        total=tr_size,
+        initial=n_batch * init_batch_tr if init_batch_tr > 1 else 0,
+        desc="Processed Graphs",
+        leave=False,
+    )
+    train_generator = networkx_to_graph_tuple_generator(
+        pytop.batch_files_generator(
+            tr_path,
+            "gpickle",
+            n_batch,
+            dataset_size=tr_size,
+            bidim_solution=bidim_solution,
+            shuffle=True,
+            random_state=random_state,
+            start_point=init_batch_tr,
+            edge_scaler=scaler,
+        )
+    )
+    return batch_bar, train_generator
+
+
 def train_ragn(
     tr_size,
     tr_path,
@@ -302,26 +328,19 @@ def train_ragn(
         )
     start_time = time()
     last_validation = start_time
+
     for _ in range(start_epoch, n_epoch + start_epoch):
-        batch_bar = tqdm(
-            total=tr_size,
-            initial=n_batch * init_batch_tr if init_batch_tr > 1 else 0,
-            desc="Processed Graphs",
-            leave=False,
+        batch_bar, train_generator = init_training_generator(
+            tr_path,
+            tr_size,
+            n_batch,
+            bidim_solution,
+            scaler,
+            random_state,
+            init_batch_tr,
         )
-        train_generator = networkx_to_graph_tuple_generator(
-            pytop.batch_files_generator(
-                tr_path,
-                "gpickle",
-                n_batch,
-                dataset_size=tr_size,
-                bidim_solution=bidim_solution,
-                shuffle=True,
-                random_state=random_state,
-                start_point=init_batch_tr,
-                edge_scaler=scaler,
-            )
-        )
+        if init_batch_tr > 1:
+            init_batch_tr = 1
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
             out_tr_graphs, loss = update_model_weights(in_graphs, gt_graphs)
             if not asserted and status is not None:
@@ -345,16 +364,6 @@ def train_ragn(
                     val_acc = get_accuracy(
                         out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy()
                     )
-                # log_scalars(
-                #     scalar_writer,
-                #    {
-                #        "loss": loss.numpy(),
-                #        "learning rate": lr().numpy(),
-                #        "train accuracy": tr_acc,
-                #        "val accuracy": val_acc,
-                #    },
-                #    global_step.numpy(),
-                # )
                 log_scalars(
                     log_dir,
                     {
