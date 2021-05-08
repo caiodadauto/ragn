@@ -18,16 +18,8 @@ from ragn.utils import (
     get_signatures,
     get_accuracy,
     bi_get_accuracy,
-    binary_crossentropy,
-    crossentropy_logists,
+    bi_loss
 )
-
-
-# def log_scalars(writer, params, step):
-#     with writer.as_default():
-#         for name, value in params.items():
-#             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
-#     tf.summary.flush(writer)
 
 
 def log_scalars(path, params, step):
@@ -60,7 +52,7 @@ def set_environment(
     restore_from,
     bidim_solution,
     opt,
-    scale_edge,
+    scale,
     sufix_name,
     n_msg,
     n_epoch,
@@ -71,7 +63,7 @@ def set_environment(
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
 
-    if scale_edge:
+    if scale:
         scaler = minmax_scale
     else:
         scaler = None
@@ -86,10 +78,7 @@ def set_environment(
         create_scale=create_scale,
         bidim=bidim_solution,
     )
-    if bidim_solution:
-        loss_fn = crossentropy_logists
-    else:
-        loss_fn = binary_crossentropy
+    loss_fn = bi_loss
     lr = tf.compat.v1.train.polynomial_decay(
         init_lr,
         global_step,
@@ -124,7 +113,7 @@ def set_environment(
             class_weight="{:.2f},{:.2f}".format(class_weight[0], class_weight[1]),
             bidim_solution=bidim_solution,
             opt=opt,
-            scale_edge=scale_edge,
+            scale=scale,
             msg_ratio=msg_ratio,
             n_layers=n_layers,
             hidden_size=hidden_size,
@@ -211,9 +200,10 @@ def init_training_generator(
             dataset_size=tr_size,
             bidim_solution=bidim_solution,
             shuffle=True,
+            input_fields=dict(node=("ip", "pos")),
             random_state=random_state,
             start_point=init_batch_tr,
-            edge_scaler=scaler,
+            scaler=scaler,
         )
     )
     return batch_bar, train_generator
@@ -246,7 +236,7 @@ def train_ragn(
     restore_from=None,
     bidim_solution=False,
     opt="adam",
-    scale_edge=False,
+    scale=False,
     msg_ratio=1.0,
 ):
     def eval(in_graphs):
@@ -254,10 +244,9 @@ def train_ragn(
         return output_graphs[-1]
 
     def update_model_weights(in_graphs, gt_graphs):
-        expected = gt_graphs.edges
         with tf.GradientTape() as tape:
             output_graphs = model(in_graphs, n_msg, is_training=True)
-            loss = loss_fn(expected, output_graphs, class_weight, msg_ratio)
+            loss = loss_fn(gt_graphs, output_graphs, class_weight, msg_ratio)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(
             zip(gradients, model.trainable_variables), global_step=global_step
@@ -300,7 +289,7 @@ def train_ragn(
         restore_from,
         bidim_solution,
         opt,
-        scale_edge,
+        scale,
         sufix_name,
         n_msg,
         n_epoch,

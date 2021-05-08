@@ -5,7 +5,6 @@ from sklearn.metrics import balanced_accuracy_score
 
 import pytop
 from graph_nets import utils_np, utils_tf
-from graph_nets.graphs import EDGES, NODES, GLOBALS, RECEIVERS, SENDERS, N_NODE, N_EDGE
 
 
 def networkxs_to_graphs_tuple(
@@ -44,7 +43,8 @@ def get_validation_gts(path, bidim_solution, scaler):
             "gpickle",
             -1,
             bidim_solution=bidim_solution,
-            edge_scaler=scaler,
+            scaler=scaler,
+            input_fields=dict(node=("ip", "pos")),
         )
     )
     return next(gt_generator)
@@ -95,6 +95,24 @@ def crossentropy_logists(expected, output_graphs, class_weight, ratio):
     loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
     loss = loss / len(output_graphs)
     return loss
+
+
+def mse(expected, output_graphs, ratio):
+    loss_for_all_msg = []
+    start_idx = int(np.ceil(len(output_graphs) * ratio))
+    for predicted_graphs in output_graphs[start_idx:]:
+        predicted = predicted_graphs.nodes
+        msg_loss = tf.metrics.mse(expected, predicted)
+        loss_for_all_msg.append(msg_loss)
+    loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
+    loss = loss / len(output_graphs)
+    return loss
+
+
+def bi_loss(true_graphs, output_graphs, class_weight, ratio):
+    return crossentropy_logists(
+        true_graphs.edges, output_graphs, class_weight, ratio
+    ) + mse(true_graphs.nodes, output_graphs, ratio)
 
 
 def compute_dist_bacc(predicted, ground_truth, bidim):
