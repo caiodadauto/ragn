@@ -93,9 +93,9 @@ if __name__ == "__main__":
         help="To use the outputs in one-hot vector format",
     )
     p.add_argument(
-        "--scale-edge",
+        "--scale",
         action="store_true",
-        help="Scale edge features",
+        help="Scale node and edge features",
     )
     p.add_argument(
         "--input-fields",
