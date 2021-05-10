@@ -108,7 +108,8 @@ def set_environment(
                 log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
             )
         else:
-            log_dir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
+            log_dir = os.path.join(
+                log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
         save_hp(
             log_dir,
             tr_size=tr_size,
@@ -121,7 +122,8 @@ def set_environment(
             decay_steps=decay_steps,
             power=power,
             delta_time_to_validate=delta_time_to_validate,
-            class_weight="{:.2f},{:.2f}".format(class_weight[0], class_weight[1]),
+            class_weight="{:.2f},{:.2f}".format(
+                class_weight[0], class_weight[1]),
             bidim_solution=bidim_solution,
             opt=opt,
             scale_edge=scale_edge,
@@ -195,7 +197,7 @@ def set_environment(
 
 
 def init_training_generator(
-    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, init_batch_tr=1
+    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, init_batch_tr=1, input_fields=None
 ):
     batch_bar = tqdm(
         total=tr_size,
@@ -211,6 +213,7 @@ def init_training_generator(
             dataset_size=tr_size,
             bidim_solution=bidim_solution,
             shuffle=True,
+            input_fields=input_fields,
             random_state=random_state,
             start_point=init_batch_tr,
             scaler=scaler,
@@ -248,6 +251,7 @@ def train_ragn(
     opt="adam",
     scale_edge=False,
     msg_ratio=1.0,
+    input_fields=None,
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -314,7 +318,7 @@ def train_ragn(
     asserted = False
     best_val_acc = best_val_acc_tf.numpy()
     in_val_graphs, gt_val_graphs, _ = get_validation_gts(
-        val_path, bidim_solution, scaler
+        val_path, bidim_solution, scaler, input_fields
     )
     in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
     epoch_bar = tqdm(
@@ -338,6 +342,7 @@ def train_ragn(
             scaler,
             random_state,
             init_batch_tr,
+            input_fields
         )
         if init_batch_tr > 1:
             init_batch_tr = 1
@@ -380,7 +385,8 @@ def train_ragn(
                     best_val_acc_tf.assign(val_acc)
                     best_val_acc = val_acc
             batch_bar.update(in_graphs.n_node.shape[0])
-            batch_bar.set_postfix(loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
+            batch_bar.set_postfix(
+                loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
         epoch_bar.update()
         epoch_bar.set_postfix(loss=loss.numpy(), best_val_acc=best_val_acc)
     epoch_bar.close()

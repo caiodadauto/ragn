@@ -6,6 +6,16 @@ import tensorflow as tf
 from ragn import training
 
 
+def field(s):
+    try:
+        l = s.split(",")
+    except:
+        raise argparse.ArgumentTypeError(
+            "Fields must be a sequence of strings splited by commas"
+        )
+    return dict(node=l)
+
+
 def weights(s):
     try:
         l = list(map(float, s.split(",")))
@@ -86,6 +96,12 @@ if __name__ == "__main__":
         "--scale-edge",
         action="store_true",
         help="Scale edge features",
+    )
+    p.add_argument(
+        "--input-fields",
+        type=field,
+        default=None,
+        help="Fields to be considered as node input features",
     )
     p.add_argument(
         "--opt",

@@ -37,12 +37,13 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path, bidim_solution, scaler):
+def get_validation_gts(path, bidim_solution, scaler, input_fields=None):
     gt_generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
             "gpickle",
             -1,
+            input_fields=input_fields,
             bidim_solution=bidim_solution,
             scaler=scaler,
         )
