@@ -330,6 +330,7 @@ def train_ragn(
             scaler,
             random_state,
             init_batch_tr,
+            input_fields,
         )
         if init_batch_tr > 1:
             init_batch_tr = 1
