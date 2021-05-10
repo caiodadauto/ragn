@@ -36,7 +36,7 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path, bidim_solution, scaler):
+def get_validation_gts(path, bidim_solution, scaler, input_fields=None):
     gt_generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
@@ -44,7 +44,7 @@ def get_validation_gts(path, bidim_solution, scaler):
             -1,
             bidim_solution=bidim_solution,
             scaler=scaler,
-            input_fields=dict(node=("ip", "pos")),
+            input_fields=input_fields,
         )
     )
     return next(gt_generator)
