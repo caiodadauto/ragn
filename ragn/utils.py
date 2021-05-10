@@ -44,7 +44,7 @@ def get_validation_gts(path, bidim_solution, scaler):
             "gpickle",
             -1,
             bidim_solution=bidim_solution,
-            edge_scaler=scaler,
+            scaler=scaler,
         )
     )
     return next(gt_generator)

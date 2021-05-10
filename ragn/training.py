@@ -213,7 +213,7 @@ def init_training_generator(
             shuffle=True,
             random_state=random_state,
             start_point=init_batch_tr,
-            edge_scaler=scaler,
+            scaler=scaler,
         )
     )
     return batch_bar, train_generator
