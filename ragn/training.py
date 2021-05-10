@@ -31,7 +31,7 @@ from ragn.utils import (
 
 
 def log_scalars(path, params, step):
-    with tf.summary.create_file_writer(path).as_default():
+    with tf.summary.create_file_writer(os.path.join(path, "scalar")).as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
 
