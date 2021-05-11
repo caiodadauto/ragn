@@ -23,17 +23,12 @@ from ragn.utils import (
 )
 
 
-# def log_scalars(writer, params, step):
-#     with writer.as_default():
-#         for name, value in params.items():
-#             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
-#     tf.summary.flush(writer)
-
-
-def log_scalars(path, params, step):
+def log_scalars(path, params, step, seen_graphs, epoch):
     with tf.summary.create_file_writer(os.path.join(path, "scalar")).as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
+    with open(os.path.join(path, "stopped_step.csv"), "w") as f:
+        f.write("{}, {}\n".format(epoch, seen_graphs))
 
 
 def save_hp(base_dir, **kwargs):
@@ -60,7 +55,7 @@ def set_environment(
     restore_from,
     bidim_solution,
     opt,
-    scale_edge,
+    scale,
     sufix_name,
     n_msg,
     n_epoch,
@@ -70,12 +65,10 @@ def set_environment(
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
-
-    if scale_edge:
+    if scale:
         scaler = minmax_scale
     else:
         scaler = None
-
     model = RAGN(
         hidden_size=hidden_size,
         n_layers=n_layers,
@@ -102,6 +95,9 @@ def set_environment(
     else:
         optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
+    status = None
+    epoch = 0
+    seen_graphs = 0
     if restore_from is None:
         if sufix_name:
             log_dir = os.path.join(
@@ -110,36 +106,25 @@ def set_environment(
         else:
             log_dir = os.path.join(
                 log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
-        save_hp(
-            log_dir,
-            tr_size=tr_size,
-            n_msg=n_msg,
-            n_epoch=n_epoch,
-            n_batch=n_batch,
-            seed=seed,
-            init_lr=init_lr,
-            end_lr=end_lr,
-            decay_steps=decay_steps,
-            power=power,
-            delta_time_to_validate=delta_time_to_validate,
-            class_weight="{:.2f},{:.2f}".format(
-                class_weight[0], class_weight[1]),
-            bidim_solution=bidim_solution,
-            opt=opt,
-            scale_edge=scale_edge,
-            msg_ratio=msg_ratio,
-            n_layers=n_layers,
-            hidden_size=hidden_size,
-            rnn_depth=rnn_depth,
-            n_heads=n_heads,
-            n_att=n_att,
-            create_offset=create_offset,
-            create_scale=create_scale,
-        )
+        os.makedirs(log_dir)
+        with open(os.path.join(log_dir, "seed.csv"), "w") as f:
+            f.write("{}\n".format(seed))
     else:
         log_dir = os.path.join(log_path, restore_from)
-        print("Restore training session from {}".format(log_dir))
-    # scalar_writer = tf.summary.create_file_writer(os.path.join(log_dir, "scalars"))
+        with open(os.path.join(log_dir, "seed.csv"), "r") as f:
+            seed = int(f.readline().rstrip())
+        try:
+            with open(os.path.join(log_dir, "stopped_step.csv"), "r") as f:
+                epoch, seen_graphs = list(
+                    map(lambda s: int(s), f.readline().rstrip().split(","))
+                )
+        except:
+            pass
+        print("\nRestore training session from {},"
+              "stoped in epoch {} with {} processed graphs\n".format(
+                  log_dir, epoch, seen_graphs))
+    tf.random.set_seed(seed)
+    random_state = np.random.RandomState(seed=seed)
     ckpt = tf.train.Checkpoint(
         global_step=global_step,
         optimizer=optimizer,
@@ -152,30 +137,34 @@ def set_environment(
     best_ckpt_manager = tf.train.CheckpointManager(
         ckpt, os.path.join(log_dir, "best_ckpts"), max_to_keep=3
     )
-
-    tf.random.set_seed(seed)
-    random_state = np.random.RandomState(seed=seed)
-    if restore_from is None:
-        with open(os.path.join(log_dir, "sb.csv"), "w") as f:
-            f.write("{}, {}\n".format(seed, n_batch))
-        start_epoch = 0
-        init_batch_tr = 1
-        status = None
-    else:
-        with open(os.path.join(log_dir, "sb.csv"), "r") as f:
-            seed, n_batch = list(
-                map(lambda s: int(s), f.readline().rstrip().split(","))
-            )
-        tf.random.set_seed(seed)
-        random_state = np.random.RandomState(seed=seed)
+    if restore_from is not None:
         status = ckpt.restore(last_ckpt_manager.latest_checkpoint)
-        if global_step.numpy() > 0:
-            steps_per_epoch = tr_size // n_batch
-            start_epoch = global_step.numpy() // steps_per_epoch
-            if start_epoch > 0:
-                init_batch_tr = global_step.numpy() - steps_per_epoch * start_epoch
-            else:
-                init_batch_tr = global_step.numpy()
+    save_hp(
+        os.path.join(log_dir, "step-{}".format(global_step.numpy())),
+        tr_size=tr_size,
+        n_msg=n_msg,
+        epoch=epoch,
+        seen_graphs=seen_graphs,
+        seed=seed,
+        init_lr=init_lr,
+        end_lr=end_lr,
+        decay_steps=decay_steps,
+        power=power,
+        delta_time_to_validate=delta_time_to_validate,
+        class_weight="{:.2f},{:.2f}".format(
+            class_weight[0], class_weight[1]),
+        bidim_solution=bidim_solution,
+        opt=opt,
+        scale=scale,
+        msg_ratio=msg_ratio,
+        n_layers=n_layers,
+        hidden_size=hidden_size,
+        rnn_depth=rnn_depth,
+        n_heads=n_heads,
+        n_att=n_att,
+        create_offset=create_offset,
+        create_scale=create_scale,
+    )
     return (
         model,
         lr,
@@ -184,9 +173,8 @@ def set_environment(
         optimizer,
         global_step,
         best_val_acc_tf,
-        start_epoch,
-        init_batch_tr,
-        # scalar_writer,
+        epoch,
+        seen_graphs,
         log_dir,
         last_ckpt_manager,
         best_ckpt_manager,
@@ -197,11 +185,11 @@ def set_environment(
 
 
 def init_training_generator(
-    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, init_batch_tr=1, input_fields=None
+    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, seen_graphs, input_fields=None
 ):
     batch_bar = tqdm(
         total=tr_size,
-        initial=n_batch * init_batch_tr if init_batch_tr > 1 else 0,
+        initial=seen_graphs,
         desc="Processed Graphs",
         leave=False,
     )
@@ -215,7 +203,7 @@ def init_training_generator(
             shuffle=True,
             input_fields=input_fields,
             random_state=random_state,
-            start_point=init_batch_tr,
+            seen_graphs=seen_graphs,
             scaler=scaler,
         )
     )
@@ -249,7 +237,7 @@ def train_ragn(
     restore_from=None,
     bidim_solution=False,
     opt="adam",
-    scale_edge=False,
+    scale=False,
     msg_ratio=1.0,
     input_fields=None,
 ):
@@ -276,9 +264,8 @@ def train_ragn(
         optimizer,
         global_step,
         best_val_acc_tf,
-        start_epoch,
-        init_batch_tr,
-        # scalar_writer,
+        epoch,
+        seen_graphs,
         log_dir,
         last_ckpt_manager,
         best_ckpt_manager,
@@ -304,7 +291,7 @@ def train_ragn(
         restore_from,
         bidim_solution,
         opt,
-        scale_edge,
+        scale,
         sufix_name,
         n_msg,
         n_epoch,
@@ -322,7 +309,7 @@ def train_ragn(
     )
     in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
     epoch_bar = tqdm(
-        total=n_epoch + start_epoch, initial=start_epoch, desc="Processed Epochs"
+        total=n_epoch + epoch, initial=epoch, desc="Processed Epochs"
     )
     epoch_bar.set_postfix(loss=None, best_val_acc=best_val_acc)
     if not debug:
@@ -333,7 +320,7 @@ def train_ragn(
     start_time = time()
     last_validation = start_time
 
-    for _ in range(start_epoch, n_epoch + start_epoch):
+    for epoch in range(epoch, n_epoch + epoch):
         batch_bar, train_generator = init_training_generator(
             tr_path,
             tr_size,
@@ -341,12 +328,12 @@ def train_ragn(
             bidim_solution,
             scaler,
             random_state,
-            init_batch_tr,
+            seen_graphs,
             input_fields
         )
-        if init_batch_tr > 1:
-            init_batch_tr = 1
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
+            n_graphs = in_graphs.n_node.shape[0] 
+            seen_graphs += n_graphs
             out_tr_graphs, loss = update_model_weights(in_graphs, gt_graphs)
             if not asserted and status is not None:
                 status.assert_consumed()
@@ -378,15 +365,19 @@ def train_ragn(
                         "val accuracy": val_acc,
                     },
                     global_step.numpy(),
+                    seen_graphs,
+                    epoch,
                 )
                 last_ckpt_manager.save()
                 if best_val_acc <= val_acc:
                     best_ckpt_manager.save()
                     best_val_acc_tf.assign(val_acc)
                     best_val_acc = val_acc
-            batch_bar.update(in_graphs.n_node.shape[0])
+            batch_bar.update(n_graphs)
             batch_bar.set_postfix(
                 loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
+        seen_graphs = 0
+        batch_bar.close()
         epoch_bar.update()
         epoch_bar.set_postfix(loss=loss.numpy(), best_val_acc=best_val_acc)
     epoch_bar.close()
