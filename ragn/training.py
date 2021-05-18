@@ -235,7 +235,7 @@ def train_ragn(
     delta_time_to_validate=20,
     class_weight=tf.constant([1.0, 1.0], tf.float32),
     restore_from=None,
-    bidim_solution=False,
+    bidim_solution=True,
     opt="adam",
     scale=False,
     msg_ratio=1.0,

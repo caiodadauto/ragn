@@ -1,9 +1,13 @@
+import os
+
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def draw_acc(accs):
+def draw_acc(accs, log_path):
+    path = os.path.join(log_path, "img")
+    os.makedirs(path, exist_ok=True)
     sns.set_style("ticks")
     fig = plt.figure(dpi=300)
     ax = fig.subplots(1, 1, sharey=False)
@@ -15,7 +19,7 @@ def draw_acc(accs):
         cumulative=True,
         stat="density",
         binrange=(0, 1),
-        label=r"Brite, {} = {:.3f}".format(r"$\overline{ACC}$", accs.mean()),
+        label=r"Zoo, {} = {:.3f}".format(r"$\overline{ACC}$", accs.mean()),
         kde_kws=dict(cumulative=True),
     )
     ax.set_xlabel(r"ACC")
@@ -24,12 +28,14 @@ def draw_acc(accs):
     ax.set_yticks(np.arange(0, 1.25, .25))
     ax.yaxis.grid(True)
     fig.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(path, "acc.pdf"), transparent=True)
     fig.clear()
     plt.close()
 
 
-def draw_revertion(steady_values, transient_values):
+def draw_revertion(steady_values, transient_values, log_path):
+    path = os.path.join(log_path, "img")
+    os.makedirs(path, exist_ok=True)
     dists_steady = {}
     dists_transient = {}
     dists_steady[r"$\sigma_c$"] = steady_values["cost"]
@@ -149,6 +155,6 @@ def draw_revertion(steady_values, transient_values):
         ax.tick_params(axis="x", labelsize=14)
         ax.tick_params(axis="y", labelsize=14)
         fig.tight_layout()
-        plt.savefig(file_name + ".pdf", transparent=True)
+        plt.savefig(os.path.join(path, file_name + ".pdf"), transparent=True)
         fig.clear()
         plt.close()

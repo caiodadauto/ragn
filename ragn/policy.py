@@ -1,8 +1,11 @@
 import numpy as np
-
+from tqdm import tqdm
 from graph_nets import utils_np
 
 from ragn.utils import parse_edges_bi_probs
+
+
+PRINT = False
 
 
 class Router:
@@ -27,70 +30,53 @@ class Router:
             ],
         )
 
-    def update_neighbor_weight(self, header):
-        for node, weight in header.items():
-            mask = self._receivers == node
-            if np.any(mask):
-                indices = np.arange(0, len(self._receivers), 1)
-                node_idx = indices[mask]
-                self._neighbor_weights[node_idx] = weight
+    def update_weight(self, node, weight):
+        mask = self._receivers == node
+        if np.any(mask):
+            indices = np.arange(0, len(self._receivers), 1)
+            node_idx = indices[mask]
+            self._neighbor_weights[node_idx] = weight
 
-    def get_next_node(self):
+    def broadcast_weight(self, routers):
+        for receiver in self._receivers:
+            routers[receiver].update_weight(self._id, self._own_weight)
+
+    def get_next_node(self, routers):
         valid_mask = self._neighbor_weights < self._own_weight
         if np.all(~valid_mask):
-            new_own_weight = np.max(self._neighbor_weights) + 1.0
+            self._own_weight = np.max(self._neighbor_weights) + 1.0
             valid_mask = np.ones(self._neighbor_weights.shape[0], dtype=bool)
-        else:
-            new_own_weight = self._own_weight
+            self.broadcast_weight(routers)
         indices = np.argsort(self._data, order=["true_prob", "diff_prob"])
         sorted_valid_mask = valid_mask[indices]
         valid_indices = indices[sorted_valid_mask]
         next_node_idx = valid_indices[0]
         next_node = self._receivers[next_node_idx]
-        if new_own_weight == self._own_weight:
-            return next_node, self._edge_weights[next_node_idx], None
-        else:
-            self._own_weight = new_own_weight
-            return (
-                next_node,
-                self._edge_weights[next_node_idx],
-                {self._id: new_own_weight},
-            )
+        return next_node, self._edge_weights[next_node_idx]
 
 
-def flow(node, target, edge_weights, receivers, prob_links, mask, routers=None):
-    header = {}
+def flow(node, target, edge_weights, receivers, prob_links, mask, routers):
+    routers = routers.copy()
     source = node
     total_hops = 0
     total_cost = 0
-    routers = {} if routers is None else routers
     while node != target:
-        if node not in routers:
-            routers[node] = Router(
-                node,
-                prob_links[mask[node]],
-                edge_weights[mask[node]].flatten(),
-                receivers[mask[node]],
-            )
-        routers[node].update_neighbor_weight(header)
-        # print("source:", node)
-        # print("header", header)
-        # print("own weight", routers[node]._own_weight)
-        # print("neighbor weight:", routers[node]._neighbor_weights)
-        # print("edges weight:", edge_weights[mask[node]])
-        # print("probs:", prob_links[mask[node]])
-        # print("receivers:", receivers[mask[node]])
-        node, cost, header_update = routers[node].get_next_node()
+        if PRINT:
+            print("source:", node)
+            print("own weight", routers[node]._own_weight)
+            print("neighbor weight:", routers[node]._neighbor_weights)
+            print("edges weight:", edge_weights[mask[node]])
+            print("probs:", prob_links[mask[node]])
+            print("receivers:", receivers[mask[node]])
+        node, cost = routers[node].get_next_node(routers)
         total_cost += cost
         total_hops += 1
-        if header_update is not None:
-            header.update(header_update)
-        # print("to", target)
-        # print("next", node)
-        # print("header update", header_update)
-        # print("total cost", total_cost)
-        # print("total hops", total_hops)
-        # print()
+        if PRINT:
+            print("to", target)
+            print("next", node)
+            print("total cost", total_cost)
+            print("total hops", total_hops)
+            print()
     return total_cost, total_hops, routers[source]
 
 
@@ -103,10 +89,13 @@ def _get_metrics(
     receivers,
     prob_links,
     mask,
-    routers=None,
+    routers,
+    stage="Transient",
 ):
     steady_routers = {}
     metrics = {"cost": [], "hops": []}
+    bar = tqdm(total=len(sources),
+               desc="Processing {}".format(stage), leave=False)
     for node in sources:
         if node != target:
             cost, hops, source_router = flow(
@@ -115,7 +104,8 @@ def _get_metrics(
             metrics["cost"].append(djk_cost[node] / cost if cost > 0 else 0)
             metrics["hops"].append(djk_hops[node] / hops if hops > 0 else 0)
             steady_routers[node] = source_router
-    print("AVG cost", np.array(metrics["cost"]).mean())
+            bar.update()
+    bar.close()
     return metrics, steady_routers
 
 
@@ -128,18 +118,25 @@ def _mask_neighbors(idx):
 
 
 def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources):
+    routers = {}
     prob_links = graph.edges
     receivers = graph.receivers
     senders = graph.senders
+    mask = _mask_neighbors(senders)
     if sources is None:
         sources = np.unique(senders)
-    mask = _mask_neighbors(senders)
+    for node in sources:
+        routers[node] = Router(
+            node,
+            prob_links[mask[node]],
+            edge_weights[mask[node]].flatten(),
+            receivers[mask[node]],
+        )
+
     stages = {}
-    print("TRANSIENT")
     stages["transient"], steady_routers = _get_metrics(
-        sources, djk_cost, djk_hops, target, edge_weights, receivers, prob_links, mask
+        sources, djk_cost, djk_hops, target, edge_weights, receivers, prob_links, mask, routers
     )
-    print("STEADY")
     stages["steady"], _ = _get_metrics(
         sources,
         djk_cost,
@@ -151,8 +148,6 @@ def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources):
         mask,
         routers=steady_routers,
     )
-    print()
-    print()
     return stages
 
 
@@ -161,9 +156,10 @@ def get_stages(in_graphs, gt_graphs, pred_graphs):
         transient={"cost": [], "hops": []}, steady={"cost": [], "hops": []}
     )
     n_graphs = len(in_graphs.n_node)
+    bar = tqdm(total=n_graphs, desc="Processed Graphs")
     for graph_idx in range(n_graphs):
-        print("Graph", graph_idx)
-        pred_graph = parse_edges_bi_probs(utils_np.get_graph(pred_graphs, graph_idx))
+        pred_graph = parse_edges_bi_probs(
+            utils_np.get_graph(pred_graphs, graph_idx))
         gt_graph = utils_np.get_graph(gt_graphs, graph_idx)
         end_node = np.argwhere(gt_graph.nodes[:, 0] == 0).reshape(1)[0]
         djk_cost = gt_graph.nodes[:, 0]
@@ -176,6 +172,10 @@ def get_stages(in_graphs, gt_graphs, pred_graphs):
         all_stages["transient"]["hops"] += stages["transient"]["hops"]
         all_stages["steady"]["cost"] += stages["steady"]["cost"]
         all_stages["steady"]["hops"] += stages["steady"]["hops"]
+        bar.update()
+        bar.set_postfix(cost_transient=np.array(stages["transient"]["cost"]).mean(
+        ), cost_steady=np.array(stages["steady"]["cost"]).mean())
+    bar.close()
     all_stages["transient"]["cost"] = np.array(all_stages["transient"]["cost"])
     all_stages["transient"]["hops"] = np.array(all_stages["transient"]["hops"])
     all_stages["steady"]["cost"] = np.array(all_stages["steady"]["cost"])

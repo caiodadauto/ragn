@@ -103,7 +103,7 @@ def compute_dist_bacc(predicted, ground_truth, bidim):
     accs = np.zeros(n_graphs)
     for idx in range(n_graphs):
         pred_graph = utils_np.get_graph(predicted, idx)
-        gt_graph = utils_np.get_graph(predicted, idx)
+        gt_graph = utils_np.get_graph(ground_truth, idx)
         if bidim:
             acc = bi_get_accuracy(pred_graph.edges, gt_graph.edges)
         else:
