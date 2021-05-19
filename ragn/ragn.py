@@ -14,6 +14,8 @@ from graph_nets.blocks import (
     broadcast_sender_nodes_to_edges,
 )
 
+from ragn.utils import unsorted_segment_softmax
+
 
 def _compute_stacked_offsets(sizes, repeats):
     sizes = tf.cast(tf.convert_to_tensor(sizes[:-1]), tf.int32)
@@ -32,7 +34,8 @@ def _nested_concatenate(input_graphs, field_name, axis):
 
     if len(features_list) < len(input_graphs):
         raise ValueError(
-            "All graphs or no graphs must contain {} features.".format(field_name)
+            "All graphs or no graphs must contain {} features.".format(
+                field_name)
         )
 
     name = "concat_" + field_name
@@ -67,11 +70,14 @@ def concat(
         else:
             globals_ = getattr(input_graphs[0], GLOBALS)
 
-        output = input_graphs[0].replace(nodes=nodes, edges=edges, globals=globals_)
+        output = input_graphs[0].replace(
+            nodes=nodes, edges=edges, globals=globals_)
         if axis != 0:
             return output
-        n_node_per_tuple = tf.stack([tf.reduce_sum(gr.n_node) for gr in input_graphs])
-        n_edge_per_tuple = tf.stack([tf.reduce_sum(gr.n_edge) for gr in input_graphs])
+        n_node_per_tuple = tf.stack(
+            [tf.reduce_sum(gr.n_node) for gr in input_graphs])
+        n_edge_per_tuple = tf.stack(
+            [tf.reduce_sum(gr.n_edge) for gr in input_graphs])
         offsets = _compute_stacked_offsets(n_node_per_tuple, n_edge_per_tuple)
         n_node = tf.concat(
             [gr.n_node for gr in input_graphs], axis=0, name="concat_n_node"
@@ -79,10 +85,12 @@ def concat(
         n_edge = tf.concat(
             [gr.n_edge for gr in input_graphs], axis=0, name="concat_n_edge"
         )
-        receivers = [gr.receivers for gr in input_graphs if gr.receivers is not None]
+        receivers = [
+            gr.receivers for gr in input_graphs if gr.receivers is not None]
         receivers = receivers or None
         if receivers:
-            receivers = tf.concat(receivers, axis, name="concat_receivers") + offsets
+            receivers = tf.concat(
+                receivers, axis, name="concat_receivers") + offsets
         senders = [gr.senders for gr in input_graphs if gr.senders is not None]
         senders = senders or None
         if senders:
@@ -123,15 +131,18 @@ class LeakyReluNormMLP(snt.Module):
             self._linear_layers.append(
                 snt.Linear(int(np.floor(self._hidden_size * 0.7)))
             )
-            self._bn_layers.append(snt.BatchNorm(create_offset=True, create_scale=True))
+            self._bn_layers.append(snt.BatchNorm(
+                create_offset=True, create_scale=True))
         self._linear_layers.append(snt.Linear(self._hidden_size))
-        self._bn_layers.append(snt.BatchNorm(create_offset=True, create_scale=True))
+        self._bn_layers.append(snt.BatchNorm(
+            create_offset=True, create_scale=True))
 
     def __call__(self, inputs, is_training):
         outputs_op = inputs
         for linear, bn in zip(self._linear_layers, self._bn_layers):
             outputs_op = linear(outputs_op)
-            outputs_op = bn(outputs_op, is_training=is_training, test_local_stats=True)
+            outputs_op = bn(outputs_op, is_training=is_training,
+                            test_local_stats=True)
             outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
         return outputs_op
 
@@ -198,18 +209,12 @@ class RoutingMultiHeadAtt(snt.Module):
                     model_fn(hidden_size=hidden_size),
                     (
                         model_fn(hidden_size=(hidden_size // 2)),
-                        model_fn(hidden_size=(hidden_size - (hidden_size // 2))),
+                        model_fn(hidden_size=(
+                            hidden_size - (hidden_size // 2))),
                     ),
                     model_fn(hidden_size=hidden_size),
                 ]
             )
-
-    def _unsorted_segment_softmax(self, x, idx, n_idx):
-        op1 = tf.exp(x)
-        op2 = tf.math.unsorted_segment_sum(op1, idx, n_idx)
-        op3 = tf.gather(op2, idx)
-        op4 = tf.divide(op1, op3)
-        return op4
 
     def __call__(
         self,
@@ -241,9 +246,10 @@ class RoutingMultiHeadAtt(snt.Module):
             )
             value = value_model(edge_receivers, **kwargs)
             att = tf.math.sigmoid(
-                tf.reduce_sum(tf.multiply(key, query), -1, keepdims=True) / self._ratio
+                tf.reduce_sum(tf.multiply(key, query), -1,
+                              keepdims=True) / self._ratio
             )
-            norm_att = self._unsorted_segment_softmax(
+            norm_att = unsorted_segment_softmax(
                 att, senders, tf.reduce_sum(n_node)
             )
             multihead.append(tf.multiply(norm_att, value))
@@ -321,80 +327,47 @@ class OneLocalRoutingNetwork(snt.Module):
         hidden_size,
         n_layers,
         n_heads,
+        n_att,
+        create_scale,
+        create_offset,
         model=LeakyReluMLP,
         name="OneLocalRoutingNetwork",
     ):
         super(OneLocalRoutingNetwork, self).__init__(name=name)
-        model_fn = partial(make_mlp_model, n_layers=n_layers, model=model)
-        self._multihead_models = []
-        self._routing_layer = snt.Linear(1)
-        self._final_node_model = model_fn(hidden_size=hidden_size)
-        self._final_query_model = model_fn(hidden_size=hidden_size)
-        for _ in range(n_heads):
-            self._multihead_models.append(
-                [
-                    model_fn(hidden_size=hidden_size),
-                    model_fn(hidden_size=(hidden_size // 2)),
-                    model_fn(hidden_size=(hidden_size - (hidden_size // 2))),
-                    model_fn(hidden_size=8),
-                ]
+        self._att_models = []
+        # TODO: Use softmax based on neighborhood as activation function
+        self._link_decision = snt.nets.MLP(
+            [hidden_size // 2, hidden_size // 2, 1],
+            dropout_rate=0.25,
+            name="LinkDecision",
+        )
+        for _ in range(n_att):
+            self._att_models.append(
+                make_multihead_att(
+                    hidden_size, n_layers, n_heads, create_scale, create_offset, model
+                )
             )
-
-    def _unsorted_segment_softmax(self, x, idx, n_idx):
-        op1 = tf.exp(x)
-        op2 = tf.math.unsorted_segment_sum(op1, idx, n_idx)
-        op3 = tf.gather(op2, idx)
-        op4 = tf.divide(op1, op3)
-        return op4
 
     def __call__(self, graphs, **kwargs):
-        queries = utils_tf.repeat(graphs.globals, graphs.n_edge)
-        senders_feature = tf.gather(graphs.nodes, graphs.senders)
-        receivers_feature = tf.gather(graphs.nodes, graphs.receivers)
-        edge_rec_pair = tf.concat([graphs.edges, receivers_feature], -1)
-
-        multihead_routing = []
-        for (
-            query_model,
-            sender_model,
-            edge_rec_model,
-            multi_model,
-        ) in self._multihead_models:
-            enc_queries = query_model(queries, **kwargs)
-            enc_senders = sender_model(senders_feature, **kwargs)
-            enc_edge_rec = edge_rec_model(edge_rec_pair, **kwargs)
-            att_op = tf.reduce_sum(
-                tf.multiply(tf.concat([enc_senders, enc_edge_rec], -1), enc_queries),
-                -1,
-                keepdims=True,
+        destination = utils_tf.repeat(graphs.globals, graphs.n_edge)
+        sender_features = tf.gather(graphs.nodes, graphs.senders)
+        receiver_features = tf.gather(graphs.nodes, graphs.receivers)
+        edge_features = graphs.edges
+        senders = graphs.senders
+        n_node = graphs.n_node
+        for multihead_att_model in self._att_models:
+            edge_features = multihead_att_model(
+                destination,
+                sender_features,
+                edge_features,
+                receiver_features,
+                senders,
+                n_node,
+                **kwargs,
             )
-            attention_input = tf.math.sigmoid(att_op)
-            attentions = self._unsorted_segment_softmax(
-                attention_input, graphs.senders, tf.reduce_sum(graphs.n_node)
-            )
-
-            multhead_op1 = multi_model(edge_rec_pair, **kwargs)
-            multhead_op2 = tf.multiply(attentions, multhead_op1)
-            multhead_op3 = tf.math.unsorted_segment_sum(
-                multhead_op2, graphs.senders, tf.reduce_sum(graphs.n_node)
-            )
-            multihead_routing.append(multhead_op3)
-        node_attention_feature = tf.concat(multihead_routing, -1)
-        final_features = self._final_node_model(
-            tf.concat(
-                [tf.gather(node_attention_feature, graphs.senders), graphs.edges], -1
-            ),
-            **kwargs,
-        )
-        final_queries = self._final_query_model(queries, **kwargs)
-        output_edges = self._routing_layer(tf.multiply(final_features, final_queries))
-        return graphs.replace(
-            edges=self._unsorted_segment_softmax(
-                tf.math.sigmoid(output_edges),
-                graphs.senders,
-                tf.reduce_sum(graphs.n_node),
-            )
-        )
+        out_edges = unsorted_segment_softmax(self._link_decision(
+            edge_features, **kwargs), senders, tf.reduce_sum(n_node))
+        return graphs.replace(edges=out_edges)
 
 
 class MLPGraphIndependent(snt.Module):
@@ -437,7 +410,8 @@ class NeighborhoodAggregator(snt.Module):
     @snt.once
     def _create_bias(self, graphs):
         shape = graphs.nodes.shape[1:]
-        self._bias = tf.Variable(tf.zeros(shape), trainable=True, dtype=tf.float32)
+        self._bias = tf.Variable(
+            tf.zeros(shape), trainable=True, dtype=tf.float32)
 
     def __call__(self, graphs):
         self._create_bias(graphs)
@@ -460,7 +434,8 @@ class NeighborhoodAggregator(snt.Module):
             if self._to_sender
             else broadcast_sender_nodes_to_edges
         )
-        reduced_node_features = self._reducer(broadcast(graphs), indices, num_nodes)
+        reduced_node_features = self._reducer(
+            broadcast(graphs), indices, num_nodes)
         return reduced_node_features + self._bias
 
 
@@ -547,7 +522,8 @@ class RAGN(snt.Module):
         name="RAGN",
     ):
         super(RAGN, self).__init__(name=name)
-        self._encoder = MLPGraphIndependent(hidden_size=hidden_size, n_layers=n_layers)
+        self._encoder = MLPGraphIndependent(
+            hidden_size=hidden_size, n_layers=n_layers)
         self._core = GraphRecurrentNonLocalNetwork(
             hidden_size=hidden_size, depth=rnn_depth
         )
@@ -562,7 +538,12 @@ class RAGN(snt.Module):
             )
         else:
             self._lookup = OneLocalRoutingNetwork(
-                hidden_size=hidden_size, n_layers=n_layers, n_heads=n_heads
+                hidden_size=hidden_size,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                n_att=n_att,
+                create_offset=create_offset,
+                create_scale=create_scale,
             )
 
     def __call__(self, graphs, num_processing_steps, is_training):
@@ -574,7 +555,8 @@ class RAGN(snt.Module):
         latent = init_latent
         self._core.reset_state(graphs, **kwargs)
         for _ in range(num_processing_steps):
-            core_input = concat([init_latent, latent], axis=1, use_globals=False)
+            core_input = concat([init_latent, latent],
+                                axis=1, use_globals=False)
             latent = self._core(
                 core_input, edge_model_kwargs=kwargs, node_model_kwargs=kwargs
             )

@@ -2,33 +2,36 @@ import numpy as np
 from tqdm import tqdm
 from graph_nets import utils_np
 
-from ragn.utils import parse_edges_bi_probs
+from ragn.utils import parse_edges_bidim_probs
 
 
 PRINT = False
 
 
 class Router:
-    def __init__(self, node, probs, edge_weights, receivers, steady=False):
+    def __init__(self, node, probs, edge_weights, receivers, bidim=True):
         self._id = node
         self._probs = probs
-        self._steady = steady
         self._receivers = receivers
         self._edge_weights = edge_weights.copy()
         self._own_weight = 0.0
+        self._bidim = bidim
 
-        true_prob = np.zeros(self._probs.shape[0])
-        mask_true_labels = self._probs[:, 0] < self._probs[:, 1]
-        true_prob[mask_true_labels] = -1 * self._probs[mask_true_labels][:, 1]
-        diff_prob = -1 * (self._probs[:, 1] - self._probs[:, 0])
+        if self._bidim:
+            true_prob = np.zeros(self._probs.shape[0])
+            mask_true_labels = self._probs[:, 0] < self._probs[:, 1]
+            true_prob[mask_true_labels] = -1 * self._probs[mask_true_labels][:, 1]
+            diff_prob = -1 * (self._probs[:, 1] - self._probs[:, 0])
+            self._data = np.array(
+                list(zip(true_prob, diff_prob)),
+                dtype=[
+                    ("true_prob", np.float32),
+                    ("diff_prob", np.float32),
+                ],
+            )
+        else:
+            self._data = -1 * self._probs
         self._neighbor_weights = np.zeros(probs.shape[0])
-        self._data = np.array(
-            list(zip(true_prob, diff_prob)),
-            dtype=[
-                ("true_prob", np.float32),
-                ("diff_prob", np.float32),
-            ],
-        )
 
     def update_weight(self, node, weight):
         mask = self._receivers == node
@@ -47,7 +50,10 @@ class Router:
             self._own_weight = np.max(self._neighbor_weights) + 1.0
             valid_mask = np.ones(self._neighbor_weights.shape[0], dtype=bool)
             self.broadcast_weight(routers)
-        indices = np.argsort(self._data, order=["true_prob", "diff_prob"])
+        if self._bidim:
+            indices = np.argsort(self._data, order=["true_prob", "diff_prob"])
+        else:
+            indices = np.argsort(self._data)
         sorted_valid_mask = valid_mask[indices]
         valid_indices = indices[sorted_valid_mask]
         next_node_idx = valid_indices[0]
@@ -117,7 +123,7 @@ def _mask_neighbors(idx):
     return mask
 
 
-def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources):
+def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources=None, bidim=True):
     routers = {}
     prob_links = graph.edges
     receivers = graph.receivers
@@ -131,6 +137,7 @@ def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources):
             prob_links[mask[node]],
             edge_weights[mask[node]].flatten(),
             receivers[mask[node]],
+            bidim=bidim,
         )
 
     stages = {}
@@ -151,22 +158,23 @@ def reverse_link(graph, target, djk_cost, djk_hops, edge_weights, sources):
     return stages
 
 
-def get_stages(in_graphs, gt_graphs, pred_graphs):
+def get_stages(in_graphs, gt_graphs, pred_graphs, bidim=True):
     all_stages = dict(
         transient={"cost": [], "hops": []}, steady={"cost": [], "hops": []}
     )
     n_graphs = len(in_graphs.n_node)
     bar = tqdm(total=n_graphs, desc="Processed Graphs")
     for graph_idx in range(n_graphs):
-        pred_graph = parse_edges_bi_probs(
-            utils_np.get_graph(pred_graphs, graph_idx))
+        pred_graph = utils_np.get_graph(pred_graphs, graph_idx)
+        if bidim:
+            pred_graph = parse_edges_bidim_probs(pred_graph)
         gt_graph = utils_np.get_graph(gt_graphs, graph_idx)
         end_node = np.argwhere(gt_graph.nodes[:, 0] == 0).reshape(1)[0]
         djk_cost = gt_graph.nodes[:, 0]
         djk_hops = gt_graph.nodes[:, 1]
         edge_weights = utils_np.get_graph(in_graphs, graph_idx).edges
         stages = reverse_link(
-            pred_graph, end_node, djk_cost, djk_hops, edge_weights, sources=None
+            pred_graph, end_node, djk_cost, djk_hops, edge_weights, bidim=bidim
         )
         all_stages["transient"]["cost"] += stages["transient"]["cost"]
         all_stages["transient"]["hops"] += stages["transient"]["hops"]

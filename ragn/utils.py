@@ -5,7 +5,6 @@ from sklearn.metrics import balanced_accuracy_score
 
 import pytop
 from graph_nets import utils_np, utils_tf
-from graph_nets.graphs import EDGES, NODES, GLOBALS, RECEIVERS, SENDERS, N_NODE, N_EDGE
 
 
 def networkxs_to_graphs_tuple(
@@ -57,14 +56,21 @@ def get_signatures(in_graphs, gt_graphs):
     return in_signature, gt_signature
 
 
-def get_accuracy(predicted, expected, th=0.5):
-    p = (predicted >= th).astype(np.int32)
-    return balanced_accuracy_score(expected, p)
+def unsorted_segment_softmax(x, idx, n_idx):
+    op1 = tf.exp(x)
+    op2 = tf.math.unsorted_segment_sum(op1, idx, n_idx)
+    op3 = tf.gather(op2, idx)
+    op4 = tf.divide(op1, op3)
+    return op4
 
 
-def bi_get_accuracy(predicted, expected):
-    e = (expected[:, 0] <= expected[:, 1]).astype(int)
-    p = (predicted[:, 0] <= predicted[:, 1]).astype(int)
+def get_accuracy(predicted, expected, bidim=True, th=0.5):
+    if bidim:
+        e = (expected[:, 0] <= expected[:, 1]).astype(int)
+        p = (predicted[:, 0] <= predicted[:, 1]).astype(int)
+    else:
+        e = expected
+        p = (predicted >= th).astype(np.int32)
     return balanced_accuracy_score(e, p)
 
 
@@ -104,15 +110,12 @@ def compute_dist_bacc(predicted, ground_truth, bidim):
     for idx in range(n_graphs):
         pred_graph = utils_np.get_graph(predicted, idx)
         gt_graph = utils_np.get_graph(ground_truth, idx)
-        if bidim:
-            acc = bi_get_accuracy(pred_graph.edges, gt_graph.edges)
-        else:
-            acc = get_accuracy(pred_graph.edges, gt_graph.edges)
+        acc = get_accuracy(pred_graph.edges, gt_graph.edges, bidim=bidim)
         accs[idx] = acc
     return accs
 
 
-def parse_edges_bi_probs(graph):
+def parse_edges_bidim_probs(graph):
     def softmax_prob(x):
         e = np.exp(x)
         return e / np.sum(e, axis=-1, keepdims=True)

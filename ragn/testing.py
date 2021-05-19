@@ -68,8 +68,8 @@ def set_environment(
     manager = tf.train.CheckpointManager(ckpt, best_dir, max_to_keep=3)
     _ = ckpt.restore(manager.latest_checkpoint).expect_partial()
     print(
-        "\nRestore model session from {},"
-        "stoped in epoch {} with {} processed"
+        "\nRestore model session from {}, "
+        "stoped in epoch {} with {} processed "
         "graphs and presenting a best validation accuracy of {}\n".format(
             log_dir, epoch, seen_graphs, best_val_acc_tf.numpy()
         )
