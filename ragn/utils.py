@@ -91,6 +91,8 @@ def binary_crossentropy(expected, output_graphs, class_weight, ratio):
 def crossentropy_logists(expected, output_graphs, class_weight, ratio):
     loss_for_all_msg = []
     start_idx = int(np.ceil(len(output_graphs) * ratio))
+    if start_idx == len(output_graphs):
+        start_idx = len(output_graphs) - 1
     for predicted_graphs in output_graphs[start_idx:]:
         predicted = predicted_graphs.edges
         msg_loss = tf.compat.v1.losses.softmax_cross_entropy(

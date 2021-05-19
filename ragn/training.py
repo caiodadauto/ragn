@@ -22,17 +22,24 @@ from ragn.utils import (
 )
 
 
-def log_scalars(path, params, step, seen_graphs, epoch):
-    with tf.summary.create_file_writer(os.path.join(path, "scalar")).as_default():
+def log_scalars(writer, path, params, step, seen_graphs, epoch):
+    # dir = os.path.join(path,  "scalar", "epoch-" + str(epoch))
+    # with tf.summary.create_file_writer(dir).as_default():
+    with writer.as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
+        writer.flush()
     with open(os.path.join(path, "stopped_step.csv"), "w") as f:
         f.write("{}, {}\n".format(epoch, seen_graphs))
 
 
-def save_hp(base_dir, **kwargs):
-    with summary.create_file_writer(base_dir).as_default():
+def save_hp(dir, **kwargs):
+    import json
+    with summary.create_file_writer(dir).as_default():
         hp.hparams(kwargs)
+    with open(os.path.join(dir, "hp.json"), "w") as f:
+        json.dump(kwargs, f)
+
 
 
 def set_environment(
@@ -60,7 +67,7 @@ def set_environment(
     n_epoch,
     delta_time_to_validate,
     class_weight,
-    msg_ratio,
+    dropped_msg_ratio,
 ):
     global_step = tf.Variable(0, trainable=False)
     best_val_acc_tf = tf.Variable(0.0, trainable=False, dtype=tf.float32)
@@ -119,7 +126,7 @@ def set_environment(
                 )
         except:
             pass
-        print("\nRestore training session from {},"
+        print("\nRestore training session from {}, "
               "stoped in epoch {} with {} processed graphs\n".format(
                   log_dir, epoch, seen_graphs))
     tf.random.set_seed(seed)
@@ -139,7 +146,7 @@ def set_environment(
     if restore_from is not None:
         status = ckpt.restore(last_ckpt_manager.latest_checkpoint)
     save_hp(
-        os.path.join(log_dir, "step-{}".format(global_step.numpy())),
+        os.path.join(log_dir,  "hp", "step-" + str(global_step.numpy())),
         tr_size=tr_size,
         n_msg=n_msg,
         epoch=epoch,
@@ -155,7 +162,7 @@ def set_environment(
         bidim_solution=bidim_solution,
         opt=opt,
         scale=scale,
-        msg_ratio=msg_ratio,
+        dropped_msg_ratio=dropped_msg_ratio,
         n_layers=n_layers,
         hidden_size=hidden_size,
         rnn_depth=rnn_depth,
@@ -180,6 +187,7 @@ def set_environment(
         random_state,
         status,
         scaler,
+        tf.summary.create_file_writer(os.path.join(log_dir,  "scalar", "epoch-" + str(epoch)))
     )
 
 
@@ -232,14 +240,15 @@ def train_ragn(
     decay_steps=70000,
     power=3,
     delta_time_to_validate=20,
-    class_weight=tf.constant([1.0, 1.0], tf.float32),
+    class_weight=[1.0, 1.0],
     restore_from=None,
     bidim_solution=True,
     opt="adam",
     scale=False,
-    msg_ratio=1.0,
+    dropped_msg_ratio=0.0,
     input_fields=None,
 ):
+    class_weight = tf.constant(class_weight, dtype=tf.float32)
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
         return output_graphs[-1]
@@ -248,7 +257,7 @@ def train_ragn(
         expected = gt_graphs.edges
         with tf.GradientTape() as tape:
             output_graphs = model(in_graphs, n_msg, is_training=True)
-            loss = loss_fn(expected, output_graphs, class_weight, msg_ratio)
+            loss = loss_fn(expected, output_graphs, class_weight, dropped_msg_ratio)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(
             zip(gradients, model.trainable_variables), global_step=global_step
@@ -271,6 +280,7 @@ def train_ragn(
         random_state,
         status,
         scaler,
+        scalar_writer
     ) = set_environment(
         tr_size,
         init_lr,
@@ -296,7 +306,7 @@ def train_ragn(
         n_epoch,
         delta_time_to_validate,
         class_weight,
-        msg_ratio,
+        dropped_msg_ratio,
     )
 
     tr_acc = None
@@ -306,12 +316,12 @@ def train_ragn(
     in_val_graphs, gt_val_graphs, _ = get_validation_gts(
         val_path, bidim_solution, scaler, input_fields
     )
-    in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
     epoch_bar = tqdm(
         total=n_epoch + epoch, initial=epoch, desc="Processed Epochs"
     )
     epoch_bar.set_postfix(loss=None, best_val_acc=best_val_acc)
     if not debug:
+        in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
         eval = tf.function(eval, input_signature=[in_signarute])
         update_model_weights = tf.function(
             update_model_weights, input_signature=[in_signarute, gt_signature]
@@ -348,6 +358,7 @@ def train_ragn(
                     out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy(), bidim_solution
                 )
                 log_scalars(
+                    scalar_writer,
                     log_dir,
                     {
                         "loss": loss.numpy(),
@@ -364,9 +375,9 @@ def train_ragn(
                     best_ckpt_manager.save()
                     best_val_acc_tf.assign(val_acc)
                     best_val_acc = val_acc
+                batch_bar.set_postfix(
+                    loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
             batch_bar.update(n_graphs)
-            batch_bar.set_postfix(
-                loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
         seen_graphs = 0
         batch_bar.close()
         epoch_bar.update()

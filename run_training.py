@@ -1,8 +1,6 @@
 import os
 import argparse
 
-import tensorflow as tf
-
 from ragn import training
 
 
@@ -28,7 +26,7 @@ def weights(s):
         raise argparse.ArgumentTypeError(
             "Class weights must be a sequence of two floats splited by commas"
         )
-    return tf.constant(l, dtype=tf.float32)
+    return l
 
 
 if __name__ == "__main__":
@@ -116,10 +114,10 @@ if __name__ == "__main__":
         help="Sufix name for log dir",
     )
     p.add_argument(
-        "--msg-ratio",
+        "--dropped-msg-ratio",
         type=float,
         default=0.35,
-        help="Number of partial results from message passing that will be consider in loss function",
+        help="Percentage of partial results from message passing that will not be consider in loss function",
     )
     p.add_argument(
         "--n-layers",
@@ -200,7 +198,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--class-weight",
         type=weights,
-        default=tf.constant([0.4, 1.0], dtype=tf.float32),
+        default=[0.4, 1.0],
         help="The weight for each class (non-routing link and routing link)",
     )
     args = p.parse_args()
