@@ -17,7 +17,6 @@ from ragn.utils import (
     get_validation_gts,
     get_signatures,
     get_accuracy,
-    bi_get_accuracy,
     binary_crossentropy,
     crossentropy_logists,
 )
@@ -332,7 +331,7 @@ def train_ragn(
             input_fields
         )
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
-            n_graphs = in_graphs.n_node.shape[0] 
+            n_graphs = in_graphs.n_node.shape[0]
             seen_graphs += n_graphs
             out_tr_graphs, loss = update_model_weights(in_graphs, gt_graphs)
             if not asserted and status is not None:
@@ -342,20 +341,12 @@ def train_ragn(
             if delta_time >= delta_time_to_validate:
                 out_val_graphs = eval(in_val_graphs)
                 last_validation = time()
-                if bidim_solution:
-                    tr_acc = bi_get_accuracy(
-                        out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy()
-                    )
-                    val_acc = bi_get_accuracy(
-                        out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy()
-                    )
-                else:
-                    tr_acc = get_accuracy(
-                        out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy()
-                    )
-                    val_acc = get_accuracy(
-                        out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy()
-                    )
+                tr_acc = get_accuracy(
+                    out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy(), bidim_solution
+                )
+                val_acc = get_accuracy(
+                    out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy(), bidim_solution
+                )
                 log_scalars(
                     log_dir,
                     {
