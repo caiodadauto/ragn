@@ -1,5 +1,4 @@
 from ragn.utils import (
-    networkx_to_graph_tuple_generator,
     get_validation_gts,
     get_signatures,
     compute_dist_bacc,
@@ -8,13 +7,10 @@ from ragn.utils import (
 from ragn.draw import draw_acc, draw_revertion
 from ragn.policy import get_stages
 from ragn.ragn import RAGN
-from tqdm import tqdm
-import pytop
 from sklearn.preprocessing import minmax_scale
 import tensorflow as tf
 import numpy as np
 import os
-from time import time
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 

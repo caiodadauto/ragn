@@ -4,9 +4,7 @@ from datetime import datetime as dt
 
 import numpy as np
 import tensorflow as tf
-import tensorflow.summary as summary
 from sklearn.preprocessing import minmax_scale
-from tensorboard.plugins.hparams import api as hp
 
 import pytop
 from tqdm import tqdm
@@ -18,13 +16,10 @@ from ragn.utils import (
     get_signatures,
     get_accuracy,
     binary_crossentropy,
-    crossentropy_logists,
 )
 
 
 def log_scalars(writer, path, params, step, seen_graphs, epoch):
-    # dir = os.path.join(path,  "scalar", "epoch-" + str(epoch))
-    # with tf.summary.create_file_writer(dir).as_default():
     with writer.as_default():
         for name, value in params.items():
             tf.summary.scalar(name, data=value, step=tf.cast(step, tf.int64))
@@ -33,13 +28,11 @@ def log_scalars(writer, path, params, step, seen_graphs, epoch):
         f.write("{}, {}\n".format(epoch, seen_graphs))
 
 
-def save_hp(dir, **kwargs):
+def save_params(file_path, **kwargs):
     import json
-    with summary.create_file_writer(dir).as_default():
-        hp.hparams(kwargs)
-    with open(os.path.join(dir, "hp.json"), "w") as f:
-        json.dump(kwargs, f)
 
+    with open(file_path, "w") as f:
+        json.dump(kwargs, f)
 
 
 def set_environment(
@@ -50,19 +43,16 @@ def set_environment(
     power,
     seed,
     n_batch,
-    n_layers,
-    hidden_size,
-    rnn_depth,
-    n_heads,
-    n_att,
+    enc_conf,
+    mlp_conf,
+    rnn_conf,
+    decision_conf,
     create_offset,
     create_scale,
     log_path,
     restore_from,
-    bidim_solution,
     opt,
     scale,
-    sufix_name,
     n_msg,
     n_epoch,
     delta_time_to_validate,
@@ -76,19 +66,14 @@ def set_environment(
     else:
         scaler = None
     model = RAGN(
-        hidden_size=hidden_size,
-        n_layers=n_layers,
-        rnn_depth=rnn_depth,
-        n_heads=n_heads,
-        n_att=n_att,
-        create_offset=create_offset,
-        create_scale=create_scale,
-        bidim=bidim_solution,
+        enc_conf,
+        mlp_conf,
+        rnn_conf,
+        decision_conf,
+        create_offset,
+        create_scale,
     )
-    if bidim_solution:
-        loss_fn = crossentropy_logists
-    else:
-        loss_fn = binary_crossentropy
+    loss_fn = binary_crossentropy
     lr = tf.compat.v1.train.polynomial_decay(
         init_lr,
         global_step,
@@ -101,17 +86,11 @@ def set_environment(
     else:
         optimizer = tf.compat.v1.train.RMSPropOptimizer(lr)
 
-    status = None
     epoch = 0
     seen_graphs = 0
+    status = None
     if restore_from is None:
-        if sufix_name:
-            log_dir = os.path.join(
-                log_path, dt.now().strftime("%Y%m%d-%H%M%S") + "-" + sufix_name
-            )
-        else:
-            log_dir = os.path.join(
-                log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
+        log_dir = os.path.join(log_path, dt.now().strftime("%Y%m%d-%H%M%S"))
         os.makedirs(log_dir)
         with open(os.path.join(log_dir, "seed.csv"), "w") as f:
             f.write("{}\n".format(seed))
@@ -126,9 +105,12 @@ def set_environment(
                 )
         except:
             pass
-        print("\nRestore training session from {}, "
-              "stoped in epoch {} with {} processed graphs\n".format(
-                  log_dir, epoch, seen_graphs))
+        print(
+            "\nRestore training session from {}, "
+            "stopped in epoch {} with {} processed graphs\n".format(
+                log_dir, epoch, seen_graphs
+            )
+        )
     tf.random.set_seed(seed)
     random_state = np.random.RandomState(seed=seed)
     ckpt = tf.train.Checkpoint(
@@ -145,8 +127,8 @@ def set_environment(
     )
     if restore_from is not None:
         status = ckpt.restore(last_ckpt_manager.latest_checkpoint)
-    save_hp(
-        os.path.join(log_dir,  "hp", "step-" + str(global_step.numpy())),
+    save_params(
+        os.path.join(log_dir, "step-" + str(global_step.numpy()) + ".json"),
         tr_size=tr_size,
         n_msg=n_msg,
         epoch=epoch,
@@ -157,17 +139,14 @@ def set_environment(
         decay_steps=decay_steps,
         power=power,
         delta_time_to_validate=delta_time_to_validate,
-        class_weight="{:.2f},{:.2f}".format(
-            class_weight[0], class_weight[1]),
-        bidim_solution=bidim_solution,
+        class_weight=class_weight.numpy().tolist(),
         opt=opt,
         scale=scale,
         dropped_msg_ratio=dropped_msg_ratio,
-        n_layers=n_layers,
-        hidden_size=hidden_size,
-        rnn_depth=rnn_depth,
-        n_heads=n_heads,
-        n_att=n_att,
+        enc_conf=enc_conf,
+        mlp_conf=mlp_conf,
+        rnn_conf=rnn_conf,
+        decision_conf=decision_conf,
         create_offset=create_offset,
         create_scale=create_scale,
     )
@@ -187,12 +166,14 @@ def set_environment(
         random_state,
         status,
         scaler,
-        tf.summary.create_file_writer(os.path.join(log_dir,  "scalar", "epoch-" + str(epoch)))
+        tf.summary.create_file_writer(
+            os.path.join(log_dir, "scalar", "epoch-" + str(epoch))
+        ),
     )
 
 
 def init_training_generator(
-    tr_path, tr_size, n_batch, bidim_solution, scaler, random_state, seen_graphs, input_fields=None
+    tr_path, tr_size, n_batch, scaler, random_state, seen_graphs, input_fields=None
 ):
     batch_bar = tqdm(
         total=tr_size,
@@ -206,8 +187,8 @@ def init_training_generator(
             "gpickle",
             n_batch,
             dataset_size=tr_size,
-            bidim_solution=bidim_solution,
             shuffle=True,
+            bidim_solution=False,
             input_fields=input_fields,
             random_state=random_state,
             seen_graphs=seen_graphs,
@@ -225,14 +206,12 @@ def train_ragn(
     n_msg,
     n_epoch,
     n_batch,
-    n_layers,
-    hidden_size,
-    rnn_depth,
-    n_heads,
-    n_att,
+    enc_conf,
+    mlp_conf,
+    rnn_conf,
+    decision_conf,
     create_offset,
     create_scale,
-    sufix_name="",
     debug=False,
     seed=12345,
     init_lr=5e-3,
@@ -242,16 +221,14 @@ def train_ragn(
     delta_time_to_validate=20,
     class_weight=[1.0, 1.0],
     restore_from=None,
-    bidim_solution=True,
     opt="adam",
     scale=False,
     dropped_msg_ratio=0.0,
     input_fields=None,
 ):
-    class_weight = tf.constant(class_weight, dtype=tf.float32)
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
-        return output_graphs[-1]
+        return output_graphs
 
     def update_model_weights(in_graphs, gt_graphs):
         expected = gt_graphs.edges
@@ -264,6 +241,7 @@ def train_ragn(
         )
         return output_graphs[-1], loss
 
+    class_weight = tf.constant(class_weight, dtype=tf.float32)
     (
         model,
         lr,
@@ -280,7 +258,7 @@ def train_ragn(
         random_state,
         status,
         scaler,
-        scalar_writer
+        scalar_writer,
     ) = set_environment(
         tr_size,
         init_lr,
@@ -289,19 +267,16 @@ def train_ragn(
         power,
         seed,
         n_batch,
-        n_layers,
-        hidden_size,
-        rnn_depth,
-        n_heads,
-        n_att,
+        enc_conf,
+        mlp_conf,
+        rnn_conf,
+        decision_conf,
         create_offset,
         create_scale,
         log_path,
         restore_from,
-        bidim_solution,
         opt,
         scale,
-        sufix_name,
         n_msg,
         n_epoch,
         delta_time_to_validate,
@@ -313,12 +288,8 @@ def train_ragn(
     val_acc = None
     asserted = False
     best_val_acc = best_val_acc_tf.numpy()
-    in_val_graphs, gt_val_graphs, _ = get_validation_gts(
-        val_path, bidim_solution, scaler, input_fields
-    )
-    epoch_bar = tqdm(
-        total=n_epoch + epoch, initial=epoch, desc="Processed Epochs"
-    )
+    in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path, scaler, input_fields)
+    epoch_bar = tqdm(total=n_epoch + epoch, initial=epoch, desc="Processed Epochs")
     epoch_bar.set_postfix(loss=None, best_val_acc=best_val_acc)
     if not debug:
         in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
@@ -331,14 +302,7 @@ def train_ragn(
 
     for epoch in range(epoch, n_epoch + epoch):
         batch_bar, train_generator = init_training_generator(
-            tr_path,
-            tr_size,
-            n_batch,
-            bidim_solution,
-            scaler,
-            random_state,
-            seen_graphs,
-            input_fields
+            tr_path, tr_size, n_batch, scaler, random_state, seen_graphs, input_fields
         )
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
             n_graphs = in_graphs.n_node.shape[0]
@@ -352,16 +316,20 @@ def train_ragn(
                 out_val_graphs = eval(in_val_graphs)
                 last_validation = time()
                 tr_acc = get_accuracy(
-                    out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy(), bidim_solution
+                    out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy()
                 )
                 val_acc = get_accuracy(
-                    out_val_graphs.edges.numpy(), gt_val_graphs.edges.numpy(), bidim_solution
+                    out_val_graphs[-1].edges.numpy(), gt_val_graphs.edges.numpy()
+                )
+                val_loss = loss_fn(
+                    gt_val_graphs.edges, out_val_graphs, class_weight, dropped_msg_ratio
                 )
                 log_scalars(
                     scalar_writer,
                     log_dir,
                     {
-                        "loss": loss.numpy(),
+                        "training loss": loss.numpy(),
+                        "validation loss": val_loss.numpy(),
                         "learning rate": lr().numpy(),
                         "train accuracy": tr_acc,
                         "val accuracy": val_acc,
@@ -376,10 +344,14 @@ def train_ragn(
                     best_val_acc_tf.assign(val_acc)
                     best_val_acc = val_acc
                 batch_bar.set_postfix(
-                    loss=loss.numpy(), tr_acc=tr_acc, val_acc=val_acc)
+                    tr_loss=loss.numpy(),
+                    tr_acc=tr_acc,
+                    val_loss=val_loss.numpy(),
+                    val_acc=val_acc,
+                )
             batch_bar.update(n_graphs)
         seen_graphs = 0
         batch_bar.close()
         epoch_bar.update()
-        epoch_bar.set_postfix(loss=loss.numpy(), best_val_acc=best_val_acc)
+        epoch_bar.set_postfix(tr_loss=loss.numpy(), best_val_acc=best_val_acc)
     epoch_bar.close()

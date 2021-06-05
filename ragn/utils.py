@@ -1,10 +1,95 @@
+import tree
 import numpy as np
 import networkx as nx
 import tensorflow as tf
 from sklearn.metrics import balanced_accuracy_score
 
 import pytop
-from graph_nets import utils_np, utils_tf
+from graph_nets import utils_tf, utils_np
+from graph_nets.graphs import NODES, EDGES, GLOBALS
+
+
+def _compute_stacked_offsets(sizes, repeats):
+    sizes = tf.cast(tf.convert_to_tensor(sizes[:-1]), tf.int32)
+    offset_values = tf.cumsum(tf.concat([[0], sizes], 0))
+    return utils_tf.repeat(offset_values, repeats)
+
+
+def _nested_concatenate(input_graphs, field_name, axis):
+    features_list = [
+        getattr(gr, field_name)
+        for gr in input_graphs
+        if getattr(gr, field_name) is not None
+    ]
+    if not features_list:
+        return None
+
+    if len(features_list) < len(input_graphs):
+        raise ValueError(
+            "All graphs or no graphs must contain {} features.".format(
+                field_name)
+        )
+
+    name = "concat_" + field_name
+    return tree.map_structure(lambda *x: tf.concat(x, axis, name), *features_list)
+
+
+def concat(
+    input_graphs,
+    axis,
+    use_edges=True,
+    use_nodes=True,
+    use_globals=True,
+    name="graph_concat",
+):
+    if not input_graphs:
+        raise ValueError("List argument `input_graphs` is empty")
+    utils_np._check_valid_sets_of_keys([gr._asdict() for gr in input_graphs])
+    if len(input_graphs) == 1:
+        return input_graphs[0]
+
+    with tf.name_scope(name):
+        if use_edges:
+            edges = _nested_concatenate(input_graphs, EDGES, axis)
+        else:
+            edges = getattr(input_graphs[0], EDGES)
+        if use_nodes:
+            nodes = _nested_concatenate(input_graphs, NODES, axis)
+        else:
+            nodes = getattr(input_graphs[0], NODES)
+        if use_globals:
+            globals_ = _nested_concatenate(input_graphs, GLOBALS, axis)
+        else:
+            globals_ = getattr(input_graphs[0], GLOBALS)
+
+        output = input_graphs[0].replace(
+            nodes=nodes, edges=edges, globals=globals_)
+        if axis != 0:
+            return output
+        n_node_per_tuple = tf.stack(
+            [tf.reduce_sum(gr.n_node) for gr in input_graphs])
+        n_edge_per_tuple = tf.stack(
+            [tf.reduce_sum(gr.n_edge) for gr in input_graphs])
+        offsets = _compute_stacked_offsets(n_node_per_tuple, n_edge_per_tuple)
+        n_node = tf.concat(
+            [gr.n_node for gr in input_graphs], axis=0, name="concat_n_node"
+        )
+        n_edge = tf.concat(
+            [gr.n_edge for gr in input_graphs], axis=0, name="concat_n_edge"
+        )
+        receivers = [
+            gr.receivers for gr in input_graphs if gr.receivers is not None]
+        receivers = receivers or None
+        if receivers:
+            receivers = tf.concat(
+                receivers, axis, name="concat_receivers") + offsets
+        senders = [gr.senders for gr in input_graphs if gr.senders is not None]
+        senders = senders or None
+        if senders:
+            senders = tf.concat(senders, axis, name="concat_senders") + offsets
+        return output.replace(
+            receivers=receivers, senders=senders, n_node=n_node, n_edge=n_edge
+        )
 
 
 def networkxs_to_graphs_tuple(
@@ -36,14 +121,14 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path, bidim_solution, scaler, input_fields=None):
+def get_validation_gts(path, scaler, input_fields=None):
     gt_generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
             "gpickle",
             -1,
             input_fields=input_fields,
-            bidim_solution=bidim_solution,
+            bidim_solution=False,
             scaler=scaler,
         )
     )
@@ -64,7 +149,7 @@ def unsorted_segment_softmax(x, idx, n_idx):
     return op4
 
 
-def get_accuracy(predicted, expected, bidim=True, th=0.5):
+def get_accuracy(predicted, expected, bidim=False, th=0.5):
     if bidim:
         e = (expected[:, 0] <= expected[:, 1]).astype(int)
         p = (predicted[:, 0] <= predicted[:, 1]).astype(int)
@@ -106,7 +191,7 @@ def crossentropy_logists(expected, output_graphs, class_weight, ratio):
     return loss
 
 
-def compute_dist_bacc(predicted, ground_truth, bidim):
+def compute_dist_bacc(predicted, ground_truth, bidim=False):
     n_graphs = predicted.n_node.shape[0]
     accs = np.zeros(n_graphs)
     for idx in range(n_graphs):
