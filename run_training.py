@@ -145,13 +145,13 @@ if __name__ == "__main__":
     p.add_argument(
         "--opt",
         type=str,
-        default="rmsprop",
+        default="adam",
         help="Optimizer",
     )
     p.add_argument(
         "--dropped-msg-ratio",
         type=float,
-        default=0.35,
+        default=0.4,
         help="Percentage of partial results from message passing that will not be consider in loss function",
     )
     p.add_argument(
@@ -176,7 +176,6 @@ if __name__ == "__main__":
         default=[32, 1],
         help="Configuration of the LSTM.",
     )
-
     p.add_argument(
         "--decision-conf",
         type=decision_conf,
@@ -202,7 +201,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--init-lr",
         type=float,
-        default=5e-3,
+        default=1e-3,
         help="Initial learning rate",
     )
     p.add_argument(
