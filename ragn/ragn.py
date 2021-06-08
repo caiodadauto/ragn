@@ -148,7 +148,7 @@ class LinkTransformer(snt.Module):
                 -1,
             )
             value = value_model(edge_receivers, **kwargs)
-            att = tf.math.sigmoid(
+            att = tf.nn.selu(
                 tf.reduce_sum(tf.multiply(key, query), -1, keepdims=True) / self._ratio
             )
             norm_att = unsorted_segment_softmax(att, senders, tf.reduce_sum(n_node))
