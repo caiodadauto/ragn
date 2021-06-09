@@ -104,7 +104,7 @@ class LinkTransformer(snt.Module):
             create_offset=create_offset,
         )
         self._multihead_models = []
-        self._ratio = 1.0 / tf.math.sqrt(tf.cast(mlp_conf[-1], tf.float32))
+        self._ratio = 1.0 / tf.cast(mlp_conf[-1], tf.float32)
         self._head_encoder = model_fn(conf=mlp_conf)
         self._norm = snt.LayerNorm(-1, create_scale, create_offset)
         for _ in range(num_heads):
@@ -148,7 +148,7 @@ class LinkTransformer(snt.Module):
                 -1,
             )
             value = value_model(edge_receivers, **kwargs)
-            att = tf.nn.selu(
+            att = tf.math.sigmoid(
                 tf.reduce_sum(tf.multiply(key, query), -1, keepdims=True) / self._ratio
             )
             norm_att = unsorted_segment_softmax(att, senders, tf.reduce_sum(n_node))
