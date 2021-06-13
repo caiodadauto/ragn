@@ -5,6 +5,7 @@ import tensorflow as tf
 from sklearn.metrics import balanced_accuracy_score
 
 import pytop
+from tqdm import tqdm
 from graph_nets import utils_tf, utils_np
 from graph_nets.graphs import NODES, EDGES, GLOBALS
 
@@ -121,18 +122,34 @@ def networkx_to_graph_tuple_generator(nx_generator):
         yield gt_in_graphs, gt_gt_graphs, raw_edge_features
 
 
-def get_validation_gts(path, scaler, input_fields=None):
-    gt_generator = networkx_to_graph_tuple_generator(
+def init_generator(
+    path, n_batch, scaler, random_state, seen_graphs=0, size=None, input_fields=None
+):
+    if size is not None:
+        batch_bar = tqdm(
+            total=size,
+            initial=seen_graphs,
+            desc="Processed Graphs",
+            leave=False,
+        )
+    generator = networkx_to_graph_tuple_generator(
         pytop.batch_files_generator(
             path,
             "gpickle",
-            -1,
-            input_fields=input_fields,
+            n_batch,
+            dataset_size=size,
+            shuffle=True,
             bidim_solution=False,
+            input_fields=input_fields,
+            random_state=random_state,
+            seen_graphs=seen_graphs,
             scaler=scaler,
         )
     )
-    return next(gt_generator)
+    if size is not None:
+        return batch_bar, generator
+    else:
+        return None, generator
 
 
 def get_signatures(in_graphs, gt_graphs):
@@ -159,7 +176,7 @@ def get_accuracy(predicted, expected, bidim=False, th=0.5):
     return balanced_accuracy_score(e, p)
 
 
-def binary_crossentropy(expected, output_graphs, class_weight, ratio):
+def binary_crossentropy(output_graphs, expected,  class_weight, ratio):
     loss_for_all_msg = []
     start_idx = int(np.ceil(len(output_graphs) * ratio))
     for predicted_graphs in output_graphs[start_idx:]:

@@ -6,13 +6,11 @@ import numpy as np
 import tensorflow as tf
 from sklearn.preprocessing import minmax_scale
 
-import pytop
 from tqdm import tqdm
 
 from ragn.ragn import RAGN
 from ragn.utils import (
-    networkx_to_graph_tuple_generator,
-    get_validation_gts,
+    init_generator,
     get_signatures,
     get_accuracy,
     binary_crossentropy,
@@ -36,13 +34,14 @@ def save_params(file_path, **kwargs):
 
 
 def set_environment(
+    n_tr_batch,
+    n_val_batch,
     tr_size,
     init_lr,
     end_lr,
     decay_steps,
     power,
     seed,
-    n_batch,
     enc_conf,
     mlp_conf,
     rnn_conf,
@@ -129,6 +128,8 @@ def set_environment(
         status = ckpt.restore(last_ckpt_manager.latest_checkpoint)
     save_params(
         os.path.join(log_dir, "step-" + str(global_step.numpy()) + ".json"),
+        n_tr_batch=n_tr_batch,
+        n_val_batch=n_val_batch,
         tr_size=tr_size,
         n_msg=n_msg,
         epoch=epoch,
@@ -154,7 +155,6 @@ def set_environment(
         model,
         lr,
         loss_fn,
-        n_batch,
         optimizer,
         global_step,
         best_val_acc_tf,
@@ -172,32 +172,6 @@ def set_environment(
     )
 
 
-def init_training_generator(
-    tr_path, tr_size, n_batch, scaler, random_state, seen_graphs, input_fields=None
-):
-    batch_bar = tqdm(
-        total=tr_size,
-        initial=seen_graphs,
-        desc="Processed Graphs",
-        leave=False,
-    )
-    train_generator = networkx_to_graph_tuple_generator(
-        pytop.batch_files_generator(
-            tr_path,
-            "gpickle",
-            n_batch,
-            dataset_size=tr_size,
-            shuffle=True,
-            bidim_solution=False,
-            input_fields=input_fields,
-            random_state=random_state,
-            seen_graphs=seen_graphs,
-            scaler=scaler,
-        )
-    )
-    return batch_bar, train_generator
-
-
 def train_ragn(
     tr_size,
     tr_path,
@@ -205,7 +179,8 @@ def train_ragn(
     log_path,
     n_msg,
     n_epoch,
-    n_batch,
+    n_tr_batch,
+    n_val_batch,
     enc_conf,
     mlp_conf,
     rnn_conf,
@@ -226,27 +201,42 @@ def train_ragn(
     dropped_msg_ratio=0.0,
     input_fields=None,
 ):
-    def eval(in_graphs):
-        output_graphs = model(in_graphs, n_msg, is_training=False)
-        return output_graphs
+    def eval(in_val_graphs):
+        out_val_graphs = model(in_val_graphs, n_msg, is_training=False)
+        return out_val_graphs
 
     def update_model_weights(in_graphs, gt_graphs):
         expected = gt_graphs.edges
         with tf.GradientTape() as tape:
             output_graphs = model(in_graphs, n_msg, is_training=True)
-            loss = loss_fn(expected, output_graphs, class_weight, dropped_msg_ratio)
+            loss = loss_fn(output_graphs, expected, class_weight, dropped_msg_ratio)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(
             zip(gradients, model.trainable_variables), global_step=global_step
         )
         return output_graphs[-1], loss
 
+    def get_val_metrics(val_generator):
+        all_val_acc = []
+        all_val_loss = []
+        for in_val_graphs, gt_val_graphs, raw_val_edge_features in val_generator:
+            out_val_graphs = eval(in_val_graphs)
+            val_acc = get_accuracy(
+                out_val_graphs[-1].edges.numpy(), gt_val_graphs.edges.numpy()
+            )
+            val_loss = loss_fn(
+                out_val_graphs, gt_val_graphs.edges, class_weight, dropped_msg_ratio
+            )
+            all_val_acc.append(val_acc)
+            all_val_loss.append(val_loss.numpy())
+        return np.mean(all_val_acc), np.mean(all_val_loss)
+
+
     class_weight = tf.constant(class_weight, dtype=tf.float32)
     (
         model,
         lr,
         loss_fn,
-        n_batch,
         optimizer,
         global_step,
         best_val_acc_tf,
@@ -260,13 +250,14 @@ def train_ragn(
         scaler,
         scalar_writer,
     ) = set_environment(
+        n_tr_batch,
+        n_val_batch,
         tr_size,
         init_lr,
         end_lr,
         decay_steps,
         power,
         seed,
-        n_batch,
         enc_conf,
         mlp_conf,
         rnn_conf,
@@ -288,10 +279,13 @@ def train_ragn(
     val_acc = None
     asserted = False
     best_val_acc = best_val_acc_tf.numpy()
-    in_val_graphs, gt_val_graphs, _ = get_validation_gts(val_path, scaler, input_fields)
     epoch_bar = tqdm(total=n_epoch + epoch, initial=epoch, desc="Processed Epochs")
     epoch_bar.set_postfix(loss=None, best_val_acc=best_val_acc)
     if not debug:
+        _, val_generator = init_generator(
+            val_path, n_val_batch, scaler, random_state, input_fields=input_fields
+        )
+        in_val_graphs, gt_val_graphs, _ = next(val_generator)
         in_signarute, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
         eval = tf.function(eval, input_signature=[in_signarute])
         update_model_weights = tf.function(
@@ -301,8 +295,14 @@ def train_ragn(
     last_validation = start_time
 
     for epoch in range(epoch, n_epoch + epoch):
-        batch_bar, train_generator = init_training_generator(
-            tr_path, tr_size, n_batch, scaler, random_state, seen_graphs, input_fields
+        batch_bar, train_generator = init_generator(
+            tr_path,
+            n_tr_batch,
+            scaler,
+            random_state,
+            seen_graphs,
+            tr_size,
+            input_fields,
         )
         for in_graphs, gt_graphs, raw_edge_features in train_generator:
             n_graphs = in_graphs.n_node.shape[0]
@@ -313,23 +313,24 @@ def train_ragn(
                 asserted = True
             delta_time = time() - last_validation
             if delta_time >= delta_time_to_validate:
-                out_val_graphs = eval(in_val_graphs)
-                last_validation = time()
+                _, val_generator = init_generator(
+                    val_path,
+                    n_val_batch,
+                    scaler,
+                    random_state,
+                    input_fields=input_fields,
+                )
+                val_acc, val_loss = get_val_metrics(val_generator)
+                tr_loss = loss.numpy()
                 tr_acc = get_accuracy(
                     out_tr_graphs.edges.numpy(), gt_graphs.edges.numpy()
-                )
-                val_acc = get_accuracy(
-                    out_val_graphs[-1].edges.numpy(), gt_val_graphs.edges.numpy()
-                )
-                val_loss = loss_fn(
-                    gt_val_graphs.edges, out_val_graphs, class_weight, dropped_msg_ratio
                 )
                 log_scalars(
                     scalar_writer,
                     log_dir,
                     {
-                        "training loss": loss.numpy(),
-                        "validation loss": val_loss.numpy(),
+                        "training loss": tr_loss,
+                        "validation loss": val_loss,
                         "learning rate": lr().numpy(),
                         "train accuracy": tr_acc,
                         "val accuracy": val_acc,
@@ -344,14 +345,15 @@ def train_ragn(
                     best_val_acc_tf.assign(val_acc)
                     best_val_acc = val_acc
                 batch_bar.set_postfix(
-                    tr_loss=loss.numpy(),
+                    tr_loss=tr_loss,
                     tr_acc=tr_acc,
-                    val_loss=val_loss.numpy(),
+                    val_loss=val_loss,
                     val_acc=val_acc,
                 )
+                last_validation = time()
             batch_bar.update(n_graphs)
         seen_graphs = 0
         batch_bar.close()
         epoch_bar.update()
-        epoch_bar.set_postfix(tr_loss=loss.numpy(), best_val_acc=best_val_acc)
+        epoch_bar.set_postfix(tr_loss=tr_loss, best_val_acc=best_val_acc)
     epoch_bar.close()

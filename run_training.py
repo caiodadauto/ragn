@@ -115,10 +115,16 @@ if __name__ == "__main__":
         help="Number of epochs",
     )
     p.add_argument(
-        "--n-batch",
+        "--n-tr-batch",
         type=int,
         default=128,
-        help="Batch size",
+        help="Train batch size",
+    )
+    p.add_argument(
+        "--n-val-batch",
+        type=int,
+        default=200,
+        help="Validation batch size",
     )
     p.add_argument(
         "--restore-from",
