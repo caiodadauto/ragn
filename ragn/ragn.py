@@ -15,43 +15,67 @@ from ragn.utils import concat, unsorted_segment_softmax
 from graph_nets.graphs import EDGES, SENDERS, RECEIVERS
 
 
-class NlLrMLP(snt.Module):
+class MLP(snt.Module):
     def __init__(
         self,
         conf,
-        create_scale=False,
-        create_offset=False,
-        dropout_rate=0.25,
-        name="NlLrMLP",
+        dropout_rate=0.35,
+        name="MLP",
     ):
-        super(NlLrMLP, self).__init__(name=name)
-        self._norm_layers = []
+        super(MLP, self).__init__(name=name)
         self._linear_layers = []
-        self._dropout_rate = 0.25
+        self._dropout_rate = dropout_rate
         for hidden_size in conf:
             self._linear_layers.append(snt.Linear(hidden_size))
-            self._norm_layers.append(snt.LayerNorm(-1, create_scale, create_offset))
 
     def __call__(self, inputs, is_training):
         outputs_op = inputs
-        for linear, norm in zip(self._linear_layers, self._norm_layers):
-            outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+        for linear in self._linear_layers:
+            if is_training:
+                outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
             outputs_op = linear(outputs_op)
-            outputs_op = norm(outputs_op)
             outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
         return outputs_op
 
 
-class NlLrLSTM(snt.Module):
+class NormMLP(snt.Module):
     def __init__(
         self,
         conf,
         create_scale=False,
         create_offset=False,
-        recurrent_dropout=0.25,
-        name="NlLrLSTM",
+        dropout_rate=0.35,
+        name="NormMLP",
     ):
-        super(NlLrLSTM, self).__init__(name=name)
+        super(NormMLP, self).__init__(name=name)
+        self._norms = []
+        self._linear_layers = []
+        self._dropout_rate = dropout_rate
+        for hidden_size in conf:
+            self._linear_layers.append(snt.Linear(hidden_size))
+            self._norms.append(snt.BatchNorm(create_scale, create_offset))
+
+    def __call__(self, inputs, is_training):
+        outputs_op = inputs
+        for linear, norm in zip(self._linear_layers, self._norms):
+            if is_training:
+                outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+            outputs_op = linear(outputs_op)
+            outputs_op = norm(outputs_op, is_training)
+            outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+        return outputs_op
+
+
+class NormLSTM(snt.Module):
+    def __init__(
+        self,
+        conf,
+        create_scale=False,
+        create_offset=False,
+        recurrent_dropout=0.35,
+        name="NormLSTM",
+    ):
+        super(NormLSTM, self).__init__(name=name)
         self._hidden_size = conf[0]
         train_lstm = []
         test_lstm = []
@@ -63,11 +87,7 @@ class NlLrLSTM(snt.Module):
             train_lstm.append(dropout_lstm)
         self._test_lstm = snt.DeepRNN(test_lstm)
         self._train_lstm = snt.DeepRNN(train_lstm)
-        self._norm = snt.LayerNorm(
-            -1,
-            create_scale=create_scale,
-            create_offset=create_offset,
-        )
+        self._norm = snt.BatchNorm(create_scale, create_offset)
 
     def initial_state(self, batch_size, is_training):
         if is_training:
@@ -82,7 +102,7 @@ class NlLrLSTM(snt.Module):
         else:
             outputs, next_states = self._test_lstm(inputs, prev_states[0])
             next_states = (next_states,)
-        outputs = self._norm(outputs)
+        outputs = self._norm(outputs, is_training)
         outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
         return outputs, next_states
 
@@ -98,24 +118,19 @@ class LinkTransformer(snt.Module):
         name="LinkTransformer",
     ):
         super(LinkTransformer, self).__init__(name=name)
-        model_fn = partial(
-            make_mlp_model,
-            create_scale=create_scale,
-            create_offset=create_offset,
-        )
         self._multihead_models = []
         self._ratio = 1.0 / tf.cast(mlp_conf[-1], tf.float32)
-        self._head_encoder = model_fn(conf=mlp_conf)
-        self._norm = snt.LayerNorm(-1, create_scale, create_offset)
+        self._head_encoder = make_mlp_model(conf=mlp_conf)
+        self._norm_layer = snt.LayerNorm(-1, create_scale, create_offset)
         for _ in range(num_heads):
             self._multihead_models.append(
                 [
-                    make_conv1d_model(enc_conf, create_scale, create_offset),
+                    make_conv1d_model(enc_conf),
                     (
-                        model_fn(conf=mlp_conf + [mlp_conf[-1] // 2]),
-                        model_fn(conf=mlp_conf + [mlp_conf[-1] - mlp_conf[-1] // 2]),
+                        make_mlp_model(conf=mlp_conf + [mlp_conf[-1] // 2]),
+                        make_mlp_model(conf=mlp_conf + [mlp_conf[-1] - mlp_conf[-1] // 2]),
                     ),
-                    model_fn(conf=mlp_conf),
+                    make_mlp_model(conf=mlp_conf),
                 ]
             )
 
@@ -155,7 +170,7 @@ class LinkTransformer(snt.Module):
             multihead.append(tf.multiply(norm_att, value))
         encoded_multihead = self._head_encoder(tf.concat(multihead, -1), **kwargs)
         encoded_residual_multihead = tf.add(edge_features, encoded_multihead)
-        return self._norm(encoded_residual_multihead)
+        return self._norm_layer(encoded_residual_multihead)
 
 
 class ScalarConv1D(snt.Module):
@@ -186,7 +201,7 @@ class ScalarConv1D(snt.Module):
                     padding=conv_conf[3],
                 )
             )
-        self._mlp = make_mlp_model(enc_conf[-1], create_scale, create_offset)
+        self._mlp = make_norm_mlp_model(enc_conf[-1], create_scale, create_offset)
 
     def __call__(self, inputs, **kwargs):
         outputs = tf.expand_dims(inputs[:, :-1], axis=-1)
@@ -203,8 +218,6 @@ class Conv1D(snt.Module):
     def __init__(
         self,
         enc_conf,
-        create_scale=False,
-        create_offset=False,
         name="Conv1D",
     ):
         super(Conv1D, self).__init__(name=name)
@@ -227,7 +240,7 @@ class Conv1D(snt.Module):
                     padding=conv_conf[3],
                 )
             )
-        self._mlp = make_mlp_model(enc_conf[-1], create_scale, create_offset)
+        self._mlp = make_mlp_model(enc_conf[-1])
 
     def __call__(self, inputs, **kwargs):
         outputs = tf.expand_dims(inputs, axis=-1)
@@ -240,23 +253,27 @@ class Conv1D(snt.Module):
 
 
 def make_lstm_model(conf, create_scale, create_offset):
-    return NlLrLSTM(conf, create_scale, create_offset)
+    return NormLSTM(conf, create_scale, create_offset)
 
 
 def make_link_transformer(mlp_conf, enc_conf, num_heads, create_scale, create_offset):
     return LinkTransformer(mlp_conf, enc_conf, num_heads, create_scale, create_offset)
 
 
-def make_mlp_model(conf, create_scale, create_offset):
-    return NlLrMLP(conf, create_scale, create_offset)
+def make_norm_mlp_model(conf, create_scale, create_offset):
+    return NormMLP(conf, create_scale, create_offset)
+
+
+def make_mlp_model(conf):
+    return MLP(conf)
 
 
 def make_scalar_conv1d_model(conf, create_scale, create_offset):
     return ScalarConv1D(conf, create_scale, create_offset)
 
 
-def make_conv1d_model(conf, create_scale, create_offset):
-    return Conv1D(conf, create_scale, create_offset)
+def make_conv1d_model(conf):
+    return Conv1D(conf)
 
 
 class LocalLinkDecision(snt.Module):
@@ -271,9 +288,7 @@ class LocalLinkDecision(snt.Module):
     ):
         super(LocalLinkDecision, self).__init__(name=name)
         self._transformers = []
-        self._link_decision = make_mlp_model(
-            [mlp_conf[-1] // 2, mlp_conf[-1] // 4, 1], create_scale, create_offset
-        )
+        self._link_decision = make_mlp_model([mlp_conf[-1] // 2, mlp_conf[-1] // 4, 1])
         for _ in range(decision_conf[0]):
             self._transformers.append(
                 make_link_transformer(
@@ -455,7 +470,7 @@ class RAGN(snt.Module):
                 create_offset=create_offset,
             ),
             node_model_fn=partial(
-                make_mlp_model,
+                make_norm_mlp_model,
                 conf=mlp_conf,
                 create_scale=create_scale,
                 create_offset=create_offset,
