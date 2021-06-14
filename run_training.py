@@ -173,7 +173,7 @@ if __name__ == "__main__":
     p.add_argument(
         "--mlp-conf",
         type=mlp_conf,
-        default=[32, 32, 24],
+        default=[64, 32, 32],
         help="Configuration of the MLP.",
     )
     p.add_argument(
