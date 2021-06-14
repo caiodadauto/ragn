@@ -164,38 +164,38 @@ if __name__ == "__main__":
         "--enc-conf",
         type=enc_conf,
         default=[
-            [[64, 8, 1, "SAME"], [8, 1, "SAME"]],
+            # [[64, 8, 1, "SAME"], [8, 1, "SAME"]],
             [[32, 8, 1, "SAME"], [8, 8, "VALID"]],
-            [128, 64, 32],
+            [64, 32, 32],
         ],
         help="Configuration of the encoder.",
     )
     p.add_argument(
         "--mlp-conf",
         type=mlp_conf,
-        default=[64, 32, 32],
+        default=[32, 32, 24],
         help="Configuration of the MLP.",
     )
     p.add_argument(
         "--rnn-conf",
         type=rnn_conf,
-        default=[32, 1],
+        default=[32, 2],
         help="Configuration of the LSTM.",
     )
     p.add_argument(
         "--decision-conf",
         type=decision_conf,
-        default=[2, 3],
+        default=[2, 4],
         help="Configuration of the Transformer.",
     )
     p.add_argument(
         "--create-offset",
-        action="store_true",
+        action="store_false",
         help="Create offset trainable parameter in the layer normalization",
     )
     p.add_argument(
         "--create-scale",
-        action="store_true",
+        action="store_false",
         help="Create scale trainable parameter in the layer normalization",
     )
     p.add_argument(
