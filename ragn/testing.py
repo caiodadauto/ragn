@@ -1,5 +1,13 @@
+import os
+
+import numpy as np
+import tensorflow as tf
+from tqdm import tqdm
+from sklearn.preprocessing import minmax_scale
+
+import pytop
 from ragn.utils import (
-    get_validation_gts,
+    networkx_to_graph_tuple_generator,
     get_signatures,
     compute_dist_bacc,
     to_numpy,
@@ -7,25 +15,50 @@ from ragn.utils import (
 from ragn.draw import draw_acc, draw_revertion
 from ragn.policy import get_stages
 from ragn.ragn import RAGN
-from sklearn.preprocessing import minmax_scale
-import tensorflow as tf
-import numpy as np
-import os
+
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
+def init_generator(
+    path, n_batch, scaler, random_state, seen_graphs=0, size=None, input_fields=None
+):
+    if size is not None:
+        batch_bar = tqdm(
+            total=size,
+            initial=seen_graphs,
+            desc="Processed Graphs",
+            leave=False,
+        )
+    generator = networkx_to_graph_tuple_generator(
+        pytop.batch_files_generator(
+            path,
+            "gpickle",
+            n_batch,
+            dataset_size=size,
+            shuffle=True,
+            bidim_solution=False,
+            input_fields=input_fields,
+            random_state=random_state,
+            seen_graphs=seen_graphs,
+            scaler=scaler,
+        )
+    )
+    if size is not None:
+        return batch_bar, generator
+    else:
+        return None, generator
+
+
 def set_environment(
     restore_from,
-    n_layers,
-    hidden_size,
-    rnn_depth,
-    n_heads,
-    n_att,
+    enc_conf,
+    mlp_conf,
+    rnn_conf,
+    decision_conf,
     create_offset,
     create_scale,
     log_path,
-    bidim_solution,
     scale,
 ):
     global_step = tf.Variable(0, trainable=False)
@@ -34,19 +67,19 @@ def set_environment(
         scaler = minmax_scale
     else:
         scaler = None
-    log_dir = os.path.join(log_path, restore_from)
-    best_dir = os.path.join(log_dir, "best_ckpts")
     model = RAGN(
-        hidden_size=hidden_size,
-        n_layers=n_layers,
-        rnn_depth=rnn_depth,
-        n_heads=n_heads,
-        n_att=n_att,
-        create_offset=create_offset,
-        create_scale=create_scale,
-        bidim=bidim_solution,
+        enc_conf,
+        mlp_conf,
+        rnn_conf,
+        decision_conf,
+        create_offset,
+        create_scale,
     )
 
+    epoch = 0
+    seen_graphs = 0
+    log_dir = os.path.join(log_path, restore_from)
+    best_dir = os.path.join(log_dir, "best_ckpts")
     with open(os.path.join(log_dir, "seed.csv"), "r") as f:
         seed = int(f.readline().rstrip())
     try:
@@ -83,15 +116,13 @@ def test_ragn(
     log_path,
     restore_from,
     n_msg,
-    n_layers,
-    hidden_size,
-    rnn_depth,
-    n_heads,
-    n_att,
+    enc_conf,
+    mlp_conf,
+    rnn_conf,
+    decision_conf,
     create_offset,
     create_scale,
     debug=False,
-    bidim_solution=True,
     scale=False,
     input_fields=None,
 ):
@@ -99,27 +130,21 @@ def test_ragn(
         output_graphs = model(in_graphs, n_msg, is_training=False)
         return output_graphs[-1]
 
-    (
-        model,
-        global_step,
-        random_state,
-        scaler,
-    ) = set_environment(
+    model, global_step, random_state, scaler = set_environment(
         restore_from,
-        n_layers,
-        hidden_size,
-        rnn_depth,
-        n_heads,
-        n_att,
+        enc_conf,
+        mlp_conf,
+        rnn_conf,
+        decision_conf,
         create_offset,
         create_scale,
         log_path,
-        bidim_solution,
         scale,
     )
-    in_test_graphs, gt_test_graphs, _ = get_validation_gts(
-        test_path, bidim_solution, scaler, input_fields
+    _, val_generator = init_generator(
+        test_path, -1, scaler, random_state, input_fields=input_fields
     )
+    in_test_graphs, gt_test_graphs, _ = next(val_generator)
     in_signarute, gt_signature = get_signatures(in_test_graphs, gt_test_graphs)
     if not debug:
         eval = tf.function(eval, input_signature=[in_signarute])
@@ -129,9 +154,8 @@ def test_ragn(
     gt_test_graphs = to_numpy(gt_test_graphs)
     out_test_graphs = to_numpy(out_test_graphs)
 
-    test_dist_acc = compute_dist_bacc(
-        out_test_graphs, gt_test_graphs, bidim_solution)
+    test_dist_acc = compute_dist_bacc(out_test_graphs, gt_test_graphs)
     draw_acc(test_dist_acc, log_path)
 
-    stages = get_stages(in_test_graphs, gt_test_graphs, out_test_graphs)
-    draw_revertion(stages["steady"], stages["transient"], log_path)
+    # stages = get_stages(in_test_graphs, gt_test_graphs, out_test_graphs)
+    # draw_revertion(stages["steady"], stages["transient"], log_path)

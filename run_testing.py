@@ -4,6 +4,52 @@ import argparse
 from ragn import testing
 
 
+def enc_conf(s):
+    try:
+        blocks = s.split(":")
+    except:
+        raise argparse.ArgumentTypeError("Field must has `:`")
+    conf = []
+    for b in blocks[:-1]:
+        p = b.split(",")
+        conf.append([[int(p[0]), int(p[1]), p[2]], [int(p[3]), int(p[4]), p[5]]])
+
+    conf.append([])
+    b = blocks[-1].split(",")
+    for p in b:
+        conf[-1].append(int(p))
+    return conf
+
+
+def mlp_conf(s):
+    try:
+        l = s.split(",")
+    except:
+        raise argparse.ArgumentTypeError("Field must has `,`")
+    conf = []
+    for p in l:
+        conf.append(int(p))
+    return conf
+
+
+def rnn_conf(s):
+    try:
+        l = s.split(",")
+    except:
+        raise argparse.ArgumentTypeError("Field must has `,`")
+    conf = [int(l[0]), int(l[1])]
+    return conf
+
+
+def decision_conf(s):
+    try:
+        l = s.split(",")
+    except:
+        raise argparse.ArgumentTypeError("Field must has `,`")
+    conf = [int(l[0]), int(l[1])]
+    return conf
+
+
 def field(s):
     try:
         l = s.split(",")
@@ -37,18 +83,8 @@ if __name__ == "__main__":
     p.add_argument(
         "--n-msg",
         type=int,
-        default=55,
+        default=20,
         help="Number of messages",
-    )
-    p.add_argument(
-        "--debug",
-        action="store_true",
-        help="Start the debug running, the functions are not compiled",
-    )
-    p.add_argument(
-        "--bidim-solution",
-        action="store_true",
-        help="To use the outputs in one-hot vector format",
     )
     p.add_argument(
         "--scale",
@@ -62,44 +98,47 @@ if __name__ == "__main__":
         help="Fields to be considered as node input features",
     )
     p.add_argument(
-        "--n-layers",
-        type=int,
-        default=3,
-        help="Number of layers of each MLP",
+        "--enc-conf",
+        type=enc_conf,
+        default=[
+            # [[64, 8, 1, "SAME"], [8, 1, "SAME"]],
+            [[32, 8, 1, "SAME"], [8, 8, "VALID"]],
+            [64, 32, 32],
+        ],
+        help="Configuration of the encoder.",
     )
     p.add_argument(
-        "--hidden-size",
-        type=int,
-        default=24,
-        help="The base for the number of neurons in the hidden layers for both MLP and LSTM",
+        "--mlp-conf",
+        type=mlp_conf,
+        default=[64, 32, 32],
+        help="Configuration of the MLP.",
     )
     p.add_argument(
-        "--rnn-depth",
-        type=int,
-        default=2,
-        help="The number of LSTM that will be concatenated",
+        "--rnn-conf",
+        type=rnn_conf,
+        default=[32, 2],
+        help="Configuration of the LSTM.",
     )
     p.add_argument(
-        "--n-heads",
-        type=int,
-        default=4,
-        help="The number of heads used to make the link decision",
-    )
-    p.add_argument(
-        "--n-att",
-        type=int,
-        default=3,
-        help="Number of multihead attention will be used to make the link decision",
+        "--decision-conf",
+        type=decision_conf,
+        default=[2, 4],
+        help="Configuration of the Transformer.",
     )
     p.add_argument(
         "--create-offset",
-        action="store_true",
+        action="store_false",
         help="Create offset trainable parameter in the layer normalization",
     )
     p.add_argument(
         "--create-scale",
-        action="store_true",
+        action="store_false",
         help="Create scale trainable parameter in the layer normalization",
+    )
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="Start the debug running, the functions are not compiled",
     )
     args = p.parse_args()
     testing.test_ragn(**vars(args))

@@ -208,13 +208,13 @@ def crossentropy_logists(expected, output_graphs, class_weight, ratio):
     return loss
 
 
-def compute_dist_bacc(predicted, ground_truth, bidim=False):
+def compute_dist_bacc(predicted, ground_truth):
     n_graphs = predicted.n_node.shape[0]
     accs = np.zeros(n_graphs)
     for idx in range(n_graphs):
         pred_graph = utils_np.get_graph(predicted, idx)
         gt_graph = utils_np.get_graph(ground_truth, idx)
-        acc = get_accuracy(pred_graph.edges, gt_graph.edges, bidim=bidim)
+        acc = get_accuracy(pred_graph.edges, gt_graph.edges, bidim=False)
         accs[idx] = acc
     return accs
 
