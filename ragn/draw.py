@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def draw_acc(accs, log_path):
+def draw_acc(accs, log_path, title):
     path = os.path.join(log_path, "img")
     os.makedirs(path, exist_ok=True)
     sns.set_style("ticks")
@@ -27,6 +27,7 @@ def draw_acc(accs, log_path):
     ax.legend()
     ax.set_yticks(np.arange(0, 1.25, .25))
     ax.yaxis.grid(True)
+    ax.set_title(title)
     fig.tight_layout()
     plt.savefig(os.path.join(path, "acc.pdf"), transparent=True)
     fig.clear()

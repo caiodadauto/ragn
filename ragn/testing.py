@@ -125,6 +125,7 @@ def test_ragn(
     debug=False,
     scale=False,
     input_fields=None,
+    title="",
 ):
     def eval(in_graphs):
         output_graphs = model(in_graphs, n_msg, is_training=False)
@@ -155,7 +156,7 @@ def test_ragn(
     out_test_graphs = to_numpy(out_test_graphs)
 
     test_dist_acc = compute_dist_bacc(out_test_graphs, gt_test_graphs)
-    draw_acc(test_dist_acc, log_path)
+    draw_acc(test_dist_acc, log_path, title)
 
     # stages = get_stages(in_test_graphs, gt_test_graphs, out_test_graphs)
     # draw_revertion(stages["steady"], stages["transient"], log_path)

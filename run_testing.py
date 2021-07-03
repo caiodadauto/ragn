@@ -136,6 +136,12 @@ if __name__ == "__main__":
         help="Create scale trainable parameter in the layer normalization",
     )
     p.add_argument(
+        "--title",
+        type=str,
+        default="",
+        help="Name of the plot",
+    )
+    p.add_argument(
         "--debug",
         action="store_true",
         help="Start the debug running, the functions are not compiled",
