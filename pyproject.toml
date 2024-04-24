@@ -6,7 +6,7 @@ authors = ["Caio Dadauto <caiodadauto@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">3.7.5"
-graph-nets = {git = "https://github.com/caiodadauto/graph_nets.git", rev = "main"}
+graph-nets = {git = "https://github.com/caiodadauto/graph_nets.git", rev = "feature/recurrent_blocks"}
 # pytop = {git = "https://github.com/caiodadauto/pytop.git", rev = "master"}
 numpy = "~1.19.0"
 
