@@ -25,7 +25,7 @@ def draw_acc(accs, log_path, title):
     ax.set_xlabel(r"ACC")
     ax.set_ylabel("Cumulative Frequency")
     ax.legend()
-    ax.set_yticks(np.arange(0, 1.25, .25))
+    ax.set_yticks(np.arange(0, 1.25, 0.25))
     ax.yaxis.grid(True)
     ax.set_title(title)
     fig.tight_layout()
@@ -159,3 +159,21 @@ def draw_revertion(steady_values, transient_values, log_path):
         plt.savefig(os.path.join(path, file_name + ".pdf"), transparent=True)
         fig.clear()
         plt.close()
+
+
+def draw_ip_clusters(digraph, save_path, name="", ext="pdf", use_original_pos=False):
+    if use_original_pos:
+        pos = list(dict(digraph.nodes(data="pos")).values())
+    else:
+        pos = nx.spring_layout(digraph)
+    node_colors = list(dict(digraph.nodes(data="cluster")).values())
+    edge_colors = [c for _, _, c in list(digraph.edges(data="cluster"))]
+    nx.draw_networkx_nodes(digraph, pos=pos, node_color=node_colors)  # type: ignore
+    nx.draw_networkx_edges(
+        digraph, pos=pos, connectionstyle="arc3,rad=0.2", edge_color=edge_colors  # type: ignore
+    )
+    if name == "":
+        plt.savefig(join(save_path, f"ip_cluster.{ext}"))
+    else:
+        plt.savefig(join(save_path, f"ip_cluster_{name}.{ext}"))
+    plt.close()
