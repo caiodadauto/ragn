@@ -128,7 +128,9 @@ class LinkTransformer(snt.Module):
                     make_conv1d_model(enc_conf),
                     (
                         make_mlp_model(conf=mlp_conf + [mlp_conf[-1] // 2]),
-                        make_mlp_model(conf=mlp_conf + [mlp_conf[-1] - mlp_conf[-1] // 2]),
+                        make_mlp_model(
+                            conf=mlp_conf + [mlp_conf[-1] - mlp_conf[-1] // 2]
+                        ),
                     ),
                     make_mlp_model(conf=mlp_conf),
                 ]
@@ -319,33 +321,6 @@ class LocalLinkDecision(snt.Module):
         return graphs.replace(edges=out_edges)
 
 
-# class GraphIndependent(snt.Module):
-#     def __init__(
-#         self,
-#         edge_model_fn,
-#         node_model_fn,
-#         name="MLPGraphIndependent",
-#     ):
-#         super(GraphIndependent, self).__init__(name=name)
-#         self._network = modules.GraphIndependent(
-#             edge_model_fn=edge_model_fn,
-#             node_model_fn=node_model_fn,
-#             global_model_fn=None,
-#         )
-#
-#     def __call__(self, graphs, edge_model_kwargs=None, node_model_kwargs=None):
-#         if edge_model_kwargs is None:
-#             edge_model_kwargs = {}
-#         if node_model_kwargs is None:
-#             node_model_kwargs = {}
-#         return self._network(
-#             graphs,
-#             edge_model_kwargs=edge_model_kwargs,
-#             node_model_kwargs=node_model_kwargs,
-#         )
-#
-
-
 class NeighborhoodAggregator(snt.Module):
     def __init__(self, reducer, to_sender=False, name="neighborhood_aggregator"):
         super(NeighborhoodAggregator, self).__init__(name=name)
@@ -438,7 +413,6 @@ class GraphLSTM(snt.Module):
             edge_model_kwargs = {}
         if node_model_kwargs is None:
             node_model_kwargs = {}
-
         partial_graphs, next_edge_state = self._edge_block(
             graphs, self._edge_state, edge_model_kwargs
         )
@@ -453,15 +427,17 @@ class GraphLSTM(snt.Module):
 class RAGN(snt.Module):
     def __init__(
         self,
+        num_msg,
         enc_conf,
         mlp_conf,
-        rnn_conf,
+        lstm_conf,
         decision_conf,
         create_offset=False,
         create_scale=False,
         name="RAGN",
     ):
         super(RAGN, self).__init__(name=name)
+        self._num_msg = num_msg
         self._encoder = modules.GraphIndependent(
             edge_model_fn=partial(
                 make_scalar_conv1d_model,
@@ -477,7 +453,7 @@ class RAGN(snt.Module):
             ),
             global_model_fn=None,
         )
-        self._core = GraphLSTM(rnn_conf, create_scale, create_offset)
+        self._core = GraphLSTM(lstm_conf, create_scale, create_offset)
         self._lookup = LocalLinkDecision(
             mlp_conf,
             enc_conf,
@@ -486,7 +462,7 @@ class RAGN(snt.Module):
             create_offset,
         )
 
-    def __call__(self, graphs, num_processing_steps, is_training):
+    def __call__(self, graphs, is_training):
         out_graphs = []
         kwargs = dict(is_training=is_training)
         init_latent = self._encoder(
@@ -494,7 +470,7 @@ class RAGN(snt.Module):
         )
         latent = init_latent
         self._core.reset_state(graphs, **kwargs)
-        for _ in range(num_processing_steps):
+        for _ in range(self._num_msg):
             core_input = concat([init_latent, latent], axis=1, use_globals=False)
             latent = self._core(
                 core_input, edge_model_kwargs=kwargs, node_model_kwargs=kwargs

@@ -79,74 +79,74 @@ if __name__ == "__main__":
     root_dir = os.path.join(os.path.expanduser("~"), "FintelligenceData")
     p = argparse.ArgumentParser()
     p.add_argument(
-        "--tr-size",
+        "--train-data-size",
         type=int,
         default=500000,
-        help="Size of training dataset",
+        help="Size of training dataset.",
     )
     p.add_argument(
-        "--tr-path",
+        "--train-data-path",
         type=str,
-        default="train/All",
-        help="Path to the trainig dataset",
+        default="data/train",
+        help="Path to the trainig dataset.",
     )
     p.add_argument(
-        "--val-path",
+        "--val-data-path",
         type=str,
-        default="validation/All",
-        help="Path to the validation dataset",
+        default="data/val",
+        help="Path to the validation dataset.",
     )
     p.add_argument(
         "--log-path",
         type=str,
         default="logs",
-        help="Path to save the assets",
+        help="Path to save the assets.",
     )
     p.add_argument(
-        "--n-msg",
+        "--num-msg",
         type=int,
         default=20,
-        help="Number of messages",
+        help="Number of passing of messages.",
     )
     p.add_argument(
-        "--n-epoch",
+        "--num-epoch",
         type=int,
         default=60,
-        help="Number of epochs",
+        help="Number of epochs.",
     )
     p.add_argument(
-        "--n-tr-batch",
+        "--num-train-batch",
         type=int,
         default=128,
-        help="Train batch size",
+        help="Train batch size.",
     )
     p.add_argument(
-        "--n-val-batch",
+        "--num-val-batch",
         type=int,
         default=200,
-        help="Validation batch size",
+        help="Validation batch size.",
     )
     p.add_argument(
         "--restore-from",
         type=str,
         default=None,
-        help="Path from log-path that will be used to restore the last checkpoint",
+        help="Path from log-path that will be used to restore the last checkpoint.",
     )
     p.add_argument(
         "--debug",
         action="store_true",
-        help="Debugging mode, the functions are not compiled",
+        help="Debugging mode, the functions are not compiled.",
     )
     p.add_argument(
-        "--scale",
+        "--sacale-features",
         action="store_true",
-        help="Scale edge and node features",
+        help="Scale edge and node features.",
     )
     p.add_argument(
-        "--input-fields",
+        "--node-input-fields",
         type=field,
         default=None,
-        help="Fields to be considered as node input features",
+        help="Fields to be considered as node input features.",
     )
     p.add_argument(
         "--opt",
@@ -174,10 +174,10 @@ if __name__ == "__main__":
         "--mlp-conf",
         type=mlp_conf,
         default=[64, 32, 32],
-        help="Configuration of the MLP.",
+        help="Configuration of the MLP, the size of each hidden layer.",
     )
     p.add_argument(
-        "--rnn-conf",
+        "--lstm-conf",
         type=rnn_conf,
         default=[32, 2],
         help="Configuration of the LSTM.",
@@ -191,42 +191,42 @@ if __name__ == "__main__":
     p.add_argument(
         "--create-offset",
         action="store_false",
-        help="Create offset trainable parameter in the layer normalization",
+        help="Create offset trainable parameter in the layer normalization.",
     )
     p.add_argument(
         "--create-scale",
         action="store_false",
-        help="Create scale trainable parameter in the layer normalization",
+        help="Create scale trainable parameter in the layer normalization.",
     )
     p.add_argument(
         "--seed",
         type=int,
-        default=2,
-        help="Random seed",
+        default=12345,
+        help="Random seed.",
     )
     p.add_argument(
         "--init-lr",
         type=float,
         default=1e-3,
-        help="Initial learning rate",
+        help="Initial learning rate.",
     )
     p.add_argument(
         "--end-lr",
         type=float,
         default=1e-5,
-        help="Final learning rate",
+        help="Final learning rate.",
     )
     p.add_argument(
         "--decay-steps",
         type=int,
         default=100000,
-        help="Number of steps to reach the final learning rate",
+        help="Number of epochs to reach the final learning rate.",
     )
     p.add_argument(
         "--power",
         type=int,
         default=3,
-        help="The power of the polynomial decay related for learning rate",
+        help="The power of the polynomial decay related for learning rate.",
     )
     p.add_argument(
         "--delta-time-to-validate",
