@@ -31,15 +31,16 @@ def get_edge_weights(edges, locations):
     return weights
 
 
-def get_ips(subnet_sizes, random_state, prefix_range=(20, 28)):
+def get_ips(subnet_sizes, random_state, prefix_range=(12, 28)):
     prefix_size = 32
     prefix_sizes = np.zeros(len(subnet_sizes))
     prefixes = np.zeros((len(subnet_sizes), 32))
+    prefix_array = np.arange(prefix_range[0], prefix_range[1] + 1)
     for i, subnet_size in enumerate(subnet_sizes):
         prefix = prefixes[i].copy()
         while np.any(np.all(prefix == prefixes, axis=-1)):
             while 2 ** (32 - prefix_size) - 1 < subnet_size:
-                prefix_size = random_state.choice(prefix_range)
+                prefix_size = random_state.choice(prefix_array)
             prefix[0:prefix_size] = random_state.choice([0, 1], size=prefix_size)
         prefixes[i] = prefix
         prefix_sizes[i] = prefix_size
