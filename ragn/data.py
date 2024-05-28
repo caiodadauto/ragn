@@ -1,13 +1,11 @@
 import joblib
-from os.path import join, splitext
+from os.path import join, basename
 from os import listdir, makedirs
 
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from numba import jit, prange
-from scipy.sparse import csr_array
 from sklearn.cluster import spectral_clustering
 from sklearn.preprocessing import minmax_scale
 
@@ -71,7 +69,7 @@ def add_ip(digraph, random_state, ratio_upper_range=(0.1, 0.2)):
     upper_bound = int(ratio_upper_bound * n_nodes)
     n_subnets = random_state.choice(np.arange(1, upper_bound if upper_bound > 1 else 2))
     labels = spectral_clustering(
-        nx.adjacency_matrix(graph, weight="weight").toarray(), n_clusters=n_subnets
+        nx.adjacency_matrix(graph, weight="distance").toarray(), n_clusters=n_subnets
     )
     if labels is not None:
         # _, subnet_n_nodes = np.unique(labels, return_counts=True)
@@ -85,6 +83,19 @@ def add_ip(digraph, random_state, ratio_upper_range=(0.1, 0.2)):
         subnet_start_idx = np.cumsum(subnet_n_links)
         subnet_start_idx[-1] = 0
         subnet_start_idx = np.roll(subnet_start_idx, 1)
+        for n in digraph.nodes():
+            label = labels[n]
+            prefix_size = int(prefix_sizes[label])
+            digraph.add_node(
+                n,
+                cluster=label,
+                prefix=np.pad(
+                    ips[subnet_start_idx[label]][:prefix_size],
+                    (0, 32 - prefix_size),
+                    "constant",
+                    constant_values=-1,
+                ),
+            )
         for p, s in digraph.edges():
             label_p = labels[p]
             digraph.add_edge(
@@ -95,9 +106,6 @@ def add_ip(digraph, random_state, ratio_upper_range=(0.1, 0.2)):
                 cluster=label_p,
             )
             subnet_start_idx[label_p] += 1
-        for n in digraph.nodes():
-            label = labels[n]
-            digraph.add_node(n, cluster=label)
     else:
         tqdm.write("No clusters")
     return digraph
@@ -108,27 +116,28 @@ def add_edge_weigths(digraph):
     pos = nx.layout.spring_layout(digraph)
     weights = get_edge_weights(np.array(digraph.edges), np.stack(list(pos.values())))
     nx.set_node_attributes(digraph, pos, "pos")  # type: ignore
-    nx.set_edge_attributes(digraph, dict(zip(digraph.edges, weights)), "weight")
+    nx.set_edge_attributes(digraph, dict(zip(digraph.edges, weights)), "distance")
     return digraph
 
 
-def add_shortest_path(graph, random_state):
-    random_state = random_state if random_state else np.random.RandomState()
-    all_paths = nx.all_pairs_dijkstra(graph, weight="distance")
-    end = random_state.choice(graph.nodes())
-    digraph = graph.to_directed()
-    solution_edges = []
+def add_shortest_path(digraph, random_state):
     min_distance = []
-    for node, (distance, path) in all_paths:
+    solution_edges = []
+    random_state = random_state if random_state else np.random.RandomState()
+    all_paths = nx.all_pairs_dijkstra(digraph, weight="distance")
+    end = random_state.choice(digraph.nodes())
+    for node, (distance, paths) in all_paths:
         if node != end:
-            solution_edges.extend(list(pairwise(path[end])))
+            solution_edges.extend(list(pairwise(paths[end])))
         min_distance.append(
-            (node, dict(min_distance_to_end=distance[end], hops_to_end=len(path[end])))
+            (node, dict(min_distance_to_end=distance[end], hops_to_end=len(paths[end])))
         )
     digraph.add_nodes_from(min_distance)
     digraph.add_edges_from(set_diff(digraph.edges(), solution_edges), solution=False)
     digraph.add_edges_from(solution_edges, solution=True)
-    digraph.graph["target"] = end
+    digraph.graph["target"] = (
+        end  # TODO: In LocalLinkDecision get all encoded features (e.g., latent vectors) for neighbors of target. Rebember GraphTuple has sender and receiver parameters, there are some functions in graph_nets or tensorflow that can help with this feature extraction.
+    )
     return digraph
 
 
@@ -136,10 +145,13 @@ def add_features_to_graphs(
     source_path: str, save_path: str, seed: int = 12345, debug: bool = False
 ):
     makedirs(save_path, exist_ok=True)
-    names = [splitext(p) for p in listdir(source_path)]
+    names = [
+        (basename(p).split(".")[0], ".".join(basename(p).split(".")[1:]))
+        for p in listdir(source_path)
+    ]
     random_state = np.random.RandomState(seed)
     for name, ext in tqdm(names):
-        digraph = read_graph(join(source_path, f"{name}{ext}"), directed=True)
+        digraph = read_graph(join(source_path, f"{name}.{ext}"), directed=True)
         digraph = add_edge_weigths(digraph)
         digraph = add_ip(digraph, random_state)
         digraph = add_shortest_path(digraph, random_state)
@@ -150,10 +162,8 @@ def add_features_to_graphs(
             )
 
 
-def init_generator(
-    path, n_batch, scaler, random_state, seen_graphs=0, input_fields=None
-):
-    if scaler:
+def init_generator(path, n_batch, scale_features, random_state, seen_graphs=0):
+    if scale_features:
         _scaler = minmax_scale
     else:
         _scaler = None
@@ -163,7 +173,6 @@ def init_generator(
             n_batch,
             shuffle=True,
             bidim_solution=False,
-            input_fields=input_fields,
             random_state=random_state,
             seen_graphs=seen_graphs,
             scaler=_scaler,
@@ -178,14 +187,15 @@ def batch_files_generator(
     shuffle=False,
     scaler=None,
     bidim_solution=True,
-    input_fields=None,
-    target_fields=None,
     random_state=None,
     seen_graphs=0,
     dtype=np.float32,
 ):
     random_state = np.random.RandomState() if random_state is None else random_state
-    names = [splitext(f) for f in listdir(source_path)]
+    names = [
+        (basename(p).split(".")[0], ".".join(basename(p).split(".")[1:]))
+        for p in listdir(source_path)
+    ]
     if shuffle:
         random_state.shuffle(names)
     if seen_graphs > 0:
@@ -203,8 +213,6 @@ def batch_files_generator(
             batch_names,
             scaler,
             bidim_solution,
-            input_fields,
-            target_fields,
             dtype=dtype,
             random_state=random_state,
         )
@@ -216,8 +224,6 @@ def read_from_files(
     batch_names,
     scaler=None,
     bidim_solution=True,
-    input_fields=None,
-    target_fields=None,
     dtype=np.float32,
     random_state=None,
 ):
@@ -225,12 +231,10 @@ def read_from_files(
     target_batch = []
     random_state = np.random.RandomState() if random_state is None else random_state
     for name, ext in batch_names:
-        digraph = read_graph(join(source_path, f"{name}{ext}"), directed=True)
+        digraph = read_graph(join(source_path, f"{name}.{ext}"), directed=True)
         input_graph, target_graph = graph_to_input_target(
             digraph,
             scaler=scaler,
-            input_fields=input_fields,
-            target_fields=target_fields,
             bidim_solution=bidim_solution,
             dtype=dtype,
             random_state=random_state,
@@ -244,84 +248,52 @@ def graph_to_input_target(
     graph,
     dtype=np.float32,
     scaler=None,
-    input_fields=None,
-    target_fields=None,
-    bidim_solution=True,
+    bidim_solution=False,
     random_state=None,
 ):
     _graph = graph.copy()
     random_state = np.random.RandomState() if random_state is None else random_state
-    input_node_fields = (
-        input_fields["node"] if input_fields and "node" in input_fields else ("pos",)
-    )
-    input_edge_fields = (
-        input_fields["edge"]
-        if input_fields and "edge" in input_fields
-        else ("ip", "distance")
-    )
-    target_node_fields = (
-        target_fields["node"]
-        if target_fields and "node" in target_fields
-        else ("min_distance_to_end", "hops_to_end")
-    )
-    target_edge_fields = (
-        target_fields["edge"]
-        if target_fields and "edge" in target_fields
-        else ("solution",)
-    )
     if scaler is not None:
-        d_distance = nx.get_edge_attributes(_graph, "weight")
+        d_distance = nx.get_edge_attributes(_graph, "distance")
         d_pos = nx.get_node_attributes(_graph, "pos")
         all_distance = list(d_distance.values())
         all_pos = list(d_pos.values())
         nx.set_edge_attributes(
-            _graph, dict(zip(d_distance, scaler(all_distance))), "weight"
+            _graph, dict(zip(d_distance, scaler(all_distance))), "distance"
         )
         nx.set_node_attributes(_graph, dict(zip(d_pos, scaler(all_pos))), "pos")
     input_graph = _graph.copy()
     target_graph = _graph.copy()
-    destination = _graph.graph["target"]
-    destination_out_degree = _graph.out_degree(destination)
-    destination_interface_idx = random_state.choice(range(destination_out_degree))
-    destination_interface = list(_graph.out_edges(destination, data="ip"))[
-        destination_interface_idx
-    ][-1].astype(dtype)
     for node_index, node_feature in _graph.nodes(data=True):
         input_node_features = create_feature(
-            node_feature, input_node_fields, dtype, node_index, _graph
+            node_feature, ("prefix",), dtype
         )
         target_node_features = create_feature(
-            node_feature, target_node_fields, dtype, node_index, _graph
+            node_feature, ("min_distance_to_end", "hops_to_end"), dtype
         )
         input_graph.add_node(node_index, features=input_node_features)
         target_graph.add_node(node_index, features=target_node_features)
     for sender, receiver, edge_feature in _graph.edges(data=True):
-        input_edge_features = create_feature(edge_feature, input_edge_fields, dtype)
+        input_edge_features = create_feature(edge_feature, ("ip", "distance"), dtype)
         input_graph.add_edge(sender, receiver, features=input_edge_features)
         if bidim_solution:
             target_edge = to_one_hot(
-                create_feature(edge_feature, target_edge_fields, dtype).astype(  # type: ignore
-                    np.int32
-                ),
+                create_feature(edge_feature, ("solution",), dtype).astype(np.int32),
                 2,
             )[0]
         else:
-            target_edge = create_feature(edge_feature, target_edge_fields, dtype)
+            target_edge = create_feature(edge_feature, ("solution",), dtype)
         target_graph.add_edge(sender, receiver, features=target_edge)
-    input_graph.graph["features"] = destination_interface
-    target_graph.graph["features"] = destination_interface
+    input_graph.graph["features"] = np.int32(_graph.graph["target"])
+    target_graph.graph["features"] = np.int32(_graph.graph["target"])
     return input_graph, target_graph
 
 
-def create_feature(attr, fields, dtype, index=None, graph=None):
+def create_feature(attr, fields, dtype):
     features = []
-    if fields == ():
-        return None
     for field in fields:
         if field in attr:
             fattr = attr[field]
-        elif index is not None and graph is not None:
-            fattr = graph.__getattribute__(field)(index, weight="distance")
         else:
             raise ValueError
         features.append(fattr)

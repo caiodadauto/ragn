@@ -15,21 +15,26 @@ from ragn.utils_mlf import (
 )
 
 from ragn.ragn import RAGN
-from ragn.utils import binary_crossentropy, get_signatures, get_bacc, get_f1, get_precision
+from ragn.utils import (
+    edge_binary_focal_crossentropy,
+    get_signatures,
+    get_bacc,
+    get_f1,
+    get_precision,
+)
 from ragn.data import init_generator
 
 
 def train_ragn(
     exp_name,
-    exp_tags,
-    run_tags,
-    run_id,
-    get_last_run,
+    load_runs,
     cfg_data,
     cfg_model,
     cfg_train,
+    seed,
 ):
-    run = set_mlflow(exp_name, exp_tags, run_tags, run_id, get_last_run)
+    run = set_mlflow(exp_name, fix_path=True, load_runs=load_runs)
+    assert run is not None, "Run is None"
     start_epoch = run.data.metrics.get("epoch")
     seen_graphs = run.data.metrics.get("graph")
     start_epoch = int(start_epoch) if start_epoch is not None else 0
@@ -39,7 +44,9 @@ def train_ragn(
         log_params_from_omegaconf_dict(cfg_train)
         log_params_from_omegaconf_dict(cfg_model)
         model = RAGN(**cfg_model)
-        estimator = Train(model, start_epoch, seen_graphs, **cfg_data, **cfg_train)
+        estimator = Train(
+            model, start_epoch, seen_graphs, seed=seed, **cfg_data, **cfg_train
+        )
         estimator.train()
 
 
@@ -59,15 +66,13 @@ class Train(snt.Module):
         train_data_size,
         train_batch_size,
         val_batch_size,
-        train_path_data,
-        val_path_data,
+        train_data_path,
+        val_data_path,
         seed,
         msg_drop_ratio,
-        node_fields,
-        edge_fields,
-        class_weights,
-        scaler,
-        delta_time_validation,
+        weight,
+        scale_features,
+        delta_time_to_validate,
         compile,
     ):
         super(Train, self).__init__(name="Train")
@@ -84,47 +89,36 @@ class Train(snt.Module):
         self._best_f1 = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_precision = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_delta = tf.Variable(np.infty, trainable=False, dtype=tf.float32)
-        self._delta_time_validation = delta_time_validation
+        self._delta_time_to_validate = delta_time_to_validate
         self._model = model
         self._train_data_size = train_data_size
         self._num_epochs = num_epochs
         self._train_batch_size = train_batch_size
         self._val_batch_size = val_batch_size
         self._loss_fn = partial(
-            binary_crossentropy,
-            entity="edges",
-            class_weights=tf.constant(class_weights, dtype=tf.float32),
+            edge_binary_focal_crossentropy,
             min_num_msg=tf.cast(
                 tf.math.ceil(msg_drop_ratio * self._model._num_msg), dtype=tf.int32
             ),
+            alpha=weight,
         )
         self._lr = tf.Variable(init_lr, trainable=False, dtype=tf.float32, name="lr")
         self._step = tf.Variable(0, trainable=False, dtype=tf.float32, name="tr_step")
-        self._opt = snt.optimizers.__getattribute__(optimizer)(learning_rate=self._lr)
-        self._schedule_lr_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+        self._opt = snt.optimizers.__getattribute__(optimizer)(learning_rate=self._lr)  # type: ignore
+        self._schedule_lr_fn = tf.keras.optimizers.schedules.PolynomialDecay(  # type: ignore
             init_lr, decay_steps, end_lr, power=power, cycle=cycle
         )
-        if node_fields is None and edge_fields is None:
-            input_fields = None
-        else:
-            input_fields = dict()
-            if node_fields is not None:
-                input_fields["node"] = node_fields
-            if edge_fields is not None:
-                input_fields["edge"] = edge_fields
-        self._input_fields = input_fields
-        self._train_path_data = train_path_data
-        self._val_path_data = val_path_data
+        self._train_data_path = train_data_path
+        self._val_data_path = val_data_path
         self._batch_generator = partial(
             init_generator,
-            scaler=scaler,
+            scale_features=scale_features,
             random_state=self._rs,
-            input_fields=input_fields,
         )
         self.set_managers()
         if compile:
             val_generator = self._batch_generator(
-                self._val_path_data, self._val_batch_size
+                self._val_data_path, self._val_batch_size
             )
             in_val_graphs, gt_val_graphs = next(val_generator)
             in_signature, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
@@ -214,13 +208,13 @@ class Train(snt.Module):
         acc = []
         loss = []
         precision = []
-        val_generator = self._batch_generator(self._val_path_data, self._val_batch_size)
+        val_generator = self._batch_generator(self._val_data_path, self._val_batch_size)
         for in_graphs, gt_graphs in val_generator:
             out_graphs = self._eval(in_graphs)
-            acc.append(get_bacc(gt_graphs.edges, out_graphs[-1].edges))
-            f1.append(get_f1(gt_graphs.edges, out_graphs[-1].edges))
-            precision.append(get_precision(gt_graphs.edges, out_graphs[-1].edges))
-            loss.append(self._loss_fn(gt_graphs.edges, out_graphs))
+            acc.append(get_bacc(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            f1.append(get_f1(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            precision.append(get_precision(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            loss.append(self._loss_fn(gt_graphs.edges, out_graphs))  # type: ignore
         return (
             tf.reduce_sum(acc) / len(acc),
             tf.reduce_sum(f1) / len(f1),
@@ -240,20 +234,20 @@ class Train(snt.Module):
             )
             epoch_bar.set_postfix(epoch="{} / {}".format(epoch, self._num_epochs))
             train_generator = self._batch_generator(
-                self._train_path_data,
+                self._train_data_path,
                 self._train_batch_size,
                 seen_graphs=self._seen_graphs,
             )
             for in_graphs, gt_graphs in train_generator:
-                tr_out_graphs, tr_loss = self._update_model_weights(
+                tr_out_graphs, tr_loss = self._update_model_weights(  # type: ignore
                     in_graphs, gt_graphs
                 )
                 delta_time = time() - last_validation
-                if delta_time >= self._delta_time_validation:
+                if delta_time >= self._delta_time_to_validate:
                     last_validation = time()
-                    tr_acc = get_bacc(gt_graphs.edges, tr_out_graphs.edges)
-                    tr_f1 = get_f1(gt_graphs.edges, tr_out_graphs.edges)
-                    tr_precision = get_precision(gt_graphs.edges, tr_out_graphs.edges)
+                    tr_acc = get_bacc(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
+                    tr_f1 = get_f1(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
+                    tr_precision = get_precision(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     val_acc, val_f1, val_precision, val_loss = self.__assess_val()
                     delta = tf.abs(tr_loss - val_loss)
 
@@ -261,11 +255,11 @@ class Train(snt.Module):
                     mlf.log_metric("graph", self._seen_graphs)
                     mlf.log_metric("epoch", epoch)
                     mlf.log_metrics(
-                        {
+                        {  # type: ignore
                             "tr loss": tr_loss.numpy(),
-                            "tr f1": tr_f1.numpy(),
-                            "tr bacc": tr_acc.numpy(),
-                            "tr precision": tr_precision.numpy(),
+                            "tr f1": tr_f1.numpy(),  # type: ignore
+                            "tr bacc": tr_acc.numpy(),  # type: ignore
+                            "tr precision": tr_precision.numpy(),  # type: ignore
                             "val loss": val_loss.numpy(),
                             "val f1": val_f1.numpy(),
                             "val bacc": val_acc.numpy(),
@@ -296,7 +290,7 @@ class Train(snt.Module):
                         best_precision="{:.4f}".format(self._best_precision.numpy()),
                         best_delta="{:.4f}".format(self._best_delta.numpy()),
                     )
-                self._seen_graphs += in_graphs.n_node.shape[0]
-                epoch_bar.update(in_graphs.n_node.shape[0])
+                self._seen_graphs += in_graphs.n_node.shape[0]  # type: ignore
+                epoch_bar.update(in_graphs.n_node.shape[0])  # type: ignore
             epoch_bar.close()
             self._seen_graphs = 0

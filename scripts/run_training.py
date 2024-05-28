@@ -4,20 +4,17 @@ from omegaconf import DictConfig
 from ragn.train import train_ragn
 
 
-@hydra.main(config_path="./", config_name="ragn")
+@hydra.main(config_path="./", config_name="ragn_config")
 def my_app(cfg: DictConfig) -> None:
     train_ragn(
         cfg.mlflow.exp_name,
-        cfg.mlflow.exp_tags,
-        cfg.mlflow.run_tags,
-        cfg.mlflow.run_id,
-        cfg.mlflow.get_last_run,
+        cfg.mlflow.load_runs,
         cfg.data,
         cfg.model,
         cfg.train,
+        cfg.seed,
     )
 
 
 if __name__ == "__main__":
     my_app()
-
