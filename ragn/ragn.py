@@ -1,6 +1,7 @@
 from functools import partial
 
 import sonnet as snt
+import tensorflow as tf
 from graph_nets import modules
 from graph_nets.utils_tf import concat as gn_concat
 
@@ -51,8 +52,16 @@ class RAGN(snt.Module):
             graphs, edge_model_kwargs=kwargs, node_model_kwargs=kwargs
         )
         latent = init_latent
+        num_msg = (
+            self._num_msg
+            if isinstance(self._num_msg, int)
+            else tf.cast(
+                tf.math.ceil(self._num_msg * tf.cast(graphs.n_node[0], tf.float32)),
+                tf.int32,
+            )
+        )
         self._core.reset_state(graphs, **kwargs)
-        for _ in range(self._num_msg):
+        for _ in range(num_msg):  # type: ignore
             core_input = gn_concat([init_latent, latent], axis=1, use_globals=False)
             latent = self._core(
                 core_input, edge_model_kwargs=kwargs, node_model_kwargs=kwargs

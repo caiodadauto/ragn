@@ -198,12 +198,12 @@ class EdgeConv2D(snt.Module):
         )
         attention_ips = tf.reshape(attention_inputs, shape=(-1, 4, 8, 1))
         outputs = attention_ips
-        for conv in self._convs[0:2]:
+        for conv in self._convs[0:-2]:
             outputs = conv(outputs)
             outputs = outputs * tf.repeat(
                 attention_ips, repeats=[outputs.shape[3]], axis=3
             )
-        for conv in self._convs[2:]:
+        for conv in self._convs[-2:]:
             outputs = conv(outputs)
         outputs = snt.flatten(outputs)
         outputs = outputs * tf.repeat(
@@ -237,10 +237,10 @@ class NodeConv2D(snt.Module):
     def __call__(self, inputs, **kwargs):
         prefixes = tf.reshape(inputs, shape=(-1, 4, 8, 1))
         outputs = prefixes
-        for conv in self._convs[0:2]:
+        for conv in self._convs[0:-2]:
             outputs = conv(outputs)
             outputs = outputs * tf.repeat(prefixes, repeats=[outputs.shape[3]], axis=3)
-        for conv in self._convs[2:]:
+        for conv in self._convs[-2:]:
             outputs = conv(outputs)
         outputs = snt.flatten(outputs)
         outputs = self._mlp(outputs, **kwargs)
