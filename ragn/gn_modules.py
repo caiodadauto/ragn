@@ -22,10 +22,10 @@ from ragn.snt_modules import (
 
 
 class NeighborhoodAggregator(snt.Module):
-    def __init__(self, reducer, to_sender=False, name="neighborhood_aggregator"):
+    def __init__(self, reducer, to_senders=False, name="neighborhood_aggregator"):
         super(NeighborhoodAggregator, self).__init__(name=name)
         self._reducer = reducer
-        self._to_sender = to_sender
+        self._to_senders = to_senders
 
     @snt.once
     def _create_bias(self, graphs):
@@ -47,10 +47,10 @@ class NeighborhoodAggregator(snt.Module):
             num_nodes = graphs.nodes.shape.as_list()[0]
         else:
             num_nodes = tf.reduce_sum(graphs.n_node)
-        indices = graphs.senders if self._to_sender else graphs.receivers
+        indices = graphs.senders if self._to_senders else graphs.receivers
         broadcast = (
             broadcast_receiver_nodes_to_edges
-            if self._to_sender
+            if self._to_senders
             else broadcast_sender_nodes_to_edges
         )
         reduced_node_features = self._reducer(broadcast(graphs), indices, num_nodes)
@@ -131,7 +131,8 @@ class RoutingTransformer(snt.Module):
         query_conf,
         key_conf,
         value_conf,
-        mlp_conf,
+        node_mlp_conf,
+        concat_mlp_conf,
         num_heads,
         name="routing_transformer",
     ):
@@ -139,11 +140,11 @@ class RoutingTransformer(snt.Module):
         self.dim_v = value_conf[-1]
         self._multihead_attention_models = []
         self._linear_attention = modules.GraphIndependent(
-            edge_model_fn=partial(make_mlp_model, conf=mlp_conf),
-            node_model_fn=partial(make_mlp_model, conf=mlp_conf),
+            edge_model_fn=partial(make_mlp_model, conf=concat_mlp_conf),
+            node_model_fn=partial(make_mlp_model, conf=concat_mlp_conf),
             global_model_fn=None,
         )
-        for _ in num_heads:
+        for _ in range(num_heads):
             attention_aux_model = modules.GraphNetwork(
                 edge_model_fn=partial(
                     make_routing_query_key_value,
@@ -172,7 +173,7 @@ class RoutingTransformer(snt.Module):
             )
             attention_model = modules.GraphNetwork(
                 edge_model_fn=make_scaled_attention,
-                node_model_fn=make_mlp_model,
+                node_model_fn=partial(make_mlp_model, conf=node_mlp_conf),
                 global_model_fn=lambda: lambda x: x,
                 edge_block_opt=dict(
                     use_edges=True,
@@ -189,7 +190,6 @@ class RoutingTransformer(snt.Module):
                 global_block_opt=dict(
                     use_edges=False, use_nodes=False, use_globals=True
                 ),
-                reducer=unsorted_segment_norm_attention_sum,
             )
             self._multihead_attention_models.append(
                 (attention_aux_model, attention_model)
@@ -197,7 +197,7 @@ class RoutingTransformer(snt.Module):
 
     def __call__(self, graphs, enc_graphs, is_training):
         multihead_attention_graphs = []
-        dim_attention = tf.reduce_sum(graphs.n_edges)
+        dim_attention = tf.reduce_sum(graphs.n_edge)
         total_num_node = tf.reduce_sum(graphs.n_node)
         idx_destinations = graphs.globals + (
             tf.math.cumsum(graphs.n_node) - graphs.n_node
@@ -235,11 +235,12 @@ class RoutingTransformer(snt.Module):
                         "dim_v": self.dim_v,
                     },
                     node_model_kwargs={"is_training": is_training},
-                    reducer_kwargs={"dim_attention": dim_attention},
                 )
             )
         attention_graphs = self._linear_attention(
-            utils_tf.concat(multihead_attention_graphs, use_globals=False, axis=-1)
+            utils_tf.concat(multihead_attention_graphs, use_globals=False, axis=-1),
+            edge_model_kwargs={"is_training": is_training},
+            node_model_kwargs={"is_training": is_training},
         )
         return attention_graphs
 
@@ -256,13 +257,18 @@ class LinkDecision(snt.Module):
         num_layers = link_decision_conf[0]
         edge_output_conf = link_decision_conf[1]
         # node_output_conf = link_decision_conf[2]
-        query_conf, key_conf, value_conf, mlp_conf, num_heads = link_decision_conf[2:]
+        mlp_conf, concat_mlp_conf, num_heads = link_decision_conf[2:]
         self._routing_transformers = []
         for _ in range(num_layers):
             self._routing_transformers.append(
                 (
                     RoutingTransformer(
-                        query_conf, key_conf, value_conf, mlp_conf, num_heads
+                        mlp_conf,
+                        mlp_conf,
+                        mlp_conf,
+                        mlp_conf,
+                        concat_mlp_conf,
+                        num_heads,
                     ),
                     snt.LayerNorm(
                         -1, create_scale=create_scale, create_offset=create_offset
@@ -278,13 +284,13 @@ class LinkDecision(snt.Module):
 
     def __call__(self, graphs, enc_graphs, is_training):
         outputs = graphs
-        for norm_layer, transformer in self._routing_transformers:
+        for transformer, norm_layer in self._routing_transformers:
             _outputs = transformer(outputs, enc_graphs, is_training)
             outputs = outputs.replace(
                 nodes=norm_layer(tf.add(outputs.nodes, _outputs.nodes)),
                 edges=norm_layer(tf.add(outputs.edges, _outputs.edges)),
             )
-        outputs = self._linear(outputs)
+        outputs = self._linear(outputs, edge_model_kwargs={"is_training": is_training})
         return outputs.replace(  # type:ignore
             edges=unsorted_segment_softmax(
                 outputs.edges,  # type:ignore

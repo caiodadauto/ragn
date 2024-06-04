@@ -135,9 +135,7 @@ def add_shortest_path(digraph, random_state):
     digraph.add_nodes_from(min_distance)
     digraph.add_edges_from(set_diff(digraph.edges(), solution_edges), solution=False)
     digraph.add_edges_from(solution_edges, solution=True)
-    digraph.graph["target"] = (
-        end  # TODO: In LocalLinkDecision get all encoded features (e.g., latent vectors) for neighbors of target. Rebember GraphTuple has sender and receiver parameters, there are some functions in graph_nets or tensorflow that can help with this feature extraction.
-    )
+    digraph.graph["target"] = end
     return digraph
 
 
@@ -265,9 +263,7 @@ def graph_to_input_target(
     input_graph = _graph.copy()
     target_graph = _graph.copy()
     for node_index, node_feature in _graph.nodes(data=True):
-        input_node_features = create_feature(
-            node_feature, ("prefix",), dtype
-        )
+        input_node_features = create_feature(node_feature, ("prefix",), dtype)
         target_node_features = create_feature(
             node_feature, ("min_distance_to_end", "hops_to_end"), dtype
         )
@@ -301,10 +297,7 @@ def create_feature(attr, fields, dtype):
 
 
 def networkx_to_graph_tuple_generator(nx_generator):
-    for (
-        nx_in_graphs,
-        nx_gt_graphs,
-    ) in nx_generator:
+    for nx_in_graphs, nx_gt_graphs in nx_generator:
         gt_in_graphs = networkxs_to_graphs_tuple(nx_in_graphs)
         gt_gt_graphs = networkxs_to_graphs_tuple(nx_gt_graphs)
         yield gt_in_graphs, gt_gt_graphs

@@ -69,7 +69,8 @@ class NormLSTM(snt.Module):
         else:
             outputs, next_states = self._test_lstm(inputs, prev_states[0])
             next_states = (next_states,)
-        outputs = self._norm(outputs, is_training)  # type: ignore
+        # outputs = self._norm(outputs, is_training)  # type: ignore
+        outputs = self._norm(outputs)  # type: ignore
         outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
         return outputs, next_states
 
@@ -125,7 +126,8 @@ class NormMLP(snt.Module):
             if is_training:
                 outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
             outputs_op = linear(outputs_op)
-            outputs_op = norm(outputs_op, is_training)
+            # outputs_op = norm(outputs_op, is_training)
+            outputs_op = norm(outputs_op)
             outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
         return outputs_op
 
@@ -190,7 +192,10 @@ class EdgeConv2D(snt.Module):
 
     def __call__(self, inputs, **kwargs):
         attentions = inputs[:, -1]
-        attention_inputs = tf.cast(inputs[:, :-1], tf.float32) * attentions
+        ips = tf.cast(inputs[:, :-1], tf.float32)
+        attention_inputs = ips * tf.repeat(
+            tf.expand_dims(attentions, axis=1), [ips.shape[1]], axis=1
+        )
         attention_ips = tf.reshape(attention_inputs, shape=(-1, 4, 8, 1))
         outputs = attention_ips
         for conv in self._convs[0:2]:
@@ -200,7 +205,10 @@ class EdgeConv2D(snt.Module):
             )
         for conv in self._convs[2:]:
             outputs = conv(outputs)
-        outputs = snt.flatten(outputs) * attentions
+        outputs = snt.flatten(outputs)
+        outputs = outputs * tf.repeat(
+            tf.expand_dims(attentions, axis=1), [outputs.shape[1]], axis=1
+        )
         outputs = self._mlp(outputs, **kwargs)
         return outputs
 
@@ -234,5 +242,6 @@ class NodeConv2D(snt.Module):
             outputs = outputs * tf.repeat(prefixes, repeats=[outputs.shape[3]], axis=3)
         for conv in self._convs[2:]:
             outputs = conv(outputs)
+        outputs = snt.flatten(outputs)
         outputs = self._mlp(outputs, **kwargs)
         return outputs

@@ -23,13 +23,13 @@ train:
   val_batch_size: 1 # 200
   msg_drop_ratio: 0.4 # Percentage of partial results from message passing that will not be consider in loss function.
   weight: 0.75 # The weight for routing links, the weight is used for loss computation.
-  delta_time_to_validate: 30 # The interval time that the validation dataseet should be assessed.
+  delta_time_to_validate: 3600 # The interval time that the validation dataseet should be assessed.
   scale_features: true
 model:
   num_msg: 20
   node_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
   edge_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
-  link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [32, 48, 48, 32], [32, 48, 48, 32], [96, 64, 32, 32], 3]
+  link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [96, 64, 32, 32], 3]
   lstm_conf: [32, 2]
   create_offset: true
   create_scale: true
