@@ -1,4 +1,8 @@
 seed: 12345
+defaults:  
+  - _self_  
+  - override hydra/hydra_logging: disabled  
+  - override hydra/job_logging: disabled
 hydra:
   run:
     dir: "." 
@@ -26,10 +30,13 @@ train:
   delta_time_to_validate: 3600 # The interval time that the validation dataseet should be assessed.
   scale_features: true
 model:
-  num_msg: 20
-  node_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
-  edge_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
-  link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [96, 64, 32, 32], 3]
+  num_msg: 0.15
+  # node_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
+  # edge_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
+  # link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [96, 64, 32, 32], 3]
+  node_enc_conf: [[[64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
+  edge_enc_conf: [[[64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
+  link_decision_conf: [3, [32, 16, 4, 1], [32, 16, 32], [64, 32], 2]
   lstm_conf: [32, 2]
   create_offset: true
   create_scale: true
