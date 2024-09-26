@@ -4,8 +4,8 @@ from os.path import join
 
 
 if __name__ == "__main__":
-    val_ratio = 0.2
-    train_ratio = 0.7
+    val_ratio = 0.05
+    train_ratio = 0.8
     random.seed(12345)
     file_names = listdir("data/")
     random.shuffle(file_names)

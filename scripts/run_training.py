@@ -12,7 +12,9 @@ def my_app(cfg: DictConfig) -> None:
         cfg.data,
         cfg.model,
         cfg.train,
+        cfg.num_msg,
         cfg.seed,
+        cfg.debug,
     )
 
 

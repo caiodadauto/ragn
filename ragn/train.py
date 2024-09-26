@@ -8,21 +8,24 @@ import tensorflow as tf
 import mlflow as mlf
 from tqdm import tqdm
 from ragn.utils_mlf import (
-    save_pickle,
     load_pickle,
     log_params_from_omegaconf_dict,
     set_mlflow,
+    save_pickle,
 )
+from sklearn.preprocessing import minmax_scale
+# from memory_profiler import memory_usage
 
 from ragn.ragn import RAGN
 from ragn.utils import (
-    edge_binary_focal_crossentropy,
-    get_signatures,
+    # edge_binary_focal_crossentropy,
+    edge_binary_focal_crossentropy_final,
+    # get_signatures,
     get_bacc,
     get_f1,
     get_precision,
 )
-from ragn.data import init_generator
+from ragn.data import batch_generator_from_files
 
 
 def train_ragn(
@@ -31,8 +34,16 @@ def train_ragn(
     cfg_data,
     cfg_model,
     cfg_train,
+    num_msg,
     seed,
+    debug,
 ):
+    if debug:
+        tf.debugging.experimental.enable_dump_debug_info(
+            "/tmp/tfdbg2_logdir",
+            tensor_debug_mode="FULL_HEALTH",
+            circular_buffer_size=-1,
+        )
     run = set_mlflow(exp_name, fix_path=True, load_runs=load_runs)
     assert run is not None, "Run is None"
     start_epoch = run.data.metrics.get("epoch")
@@ -45,9 +56,20 @@ def train_ragn(
         log_params_from_omegaconf_dict(cfg_model)
         model = RAGN(**cfg_model)
         estimator = Train(
-            model, start_epoch, seen_graphs, seed=seed, **cfg_data, **cfg_train
+            model,
+            start_epoch,
+            seen_graphs,
+            seed=seed,
+            num_msg=num_msg,
+            **cfg_data,
+            **cfg_train
         )
+        # with tf.profiler.experimental.Profile('profile_logdir'):
         estimator.train()
+        # tf.profiler.experimental.server.start(6009)
+        # tf.profiler.experimental.client.trace('grpc://localhost:6009',
+                                        # '/nfs/tb_log', 2000)
+        # estimator.train()
 
 
 class Train(snt.Module):
@@ -68,6 +90,7 @@ class Train(snt.Module):
         val_batch_size,
         train_data_path,
         val_data_path,
+        num_msg,
         seed,
         msg_drop_ratio,
         weight,
@@ -85,6 +108,8 @@ class Train(snt.Module):
             self._rs = load_pickle("random_state")
         except Exception:
             self._rs = np.random.RandomState(self._seed)
+        self._num_msg = num_msg
+        self._msg_drop_ratio = msg_drop_ratio
         self._best_acc = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_f1 = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_precision = tf.Variable(0.0, trainable=False, dtype=tf.float32)
@@ -95,13 +120,8 @@ class Train(snt.Module):
         self._num_epochs = num_epochs
         self._train_batch_size = train_batch_size
         self._val_batch_size = val_batch_size
-        self._loss_fn = partial(
-            edge_binary_focal_crossentropy,
-            min_num_msg=tf.cast(
-                tf.math.ceil(msg_drop_ratio * self._model._num_msg), dtype=tf.int32
-            ),
-            alpha=weight,
-        )
+        # self._loss_fn = partial(edge_binary_focal_crossentropy, alpha=weight)
+        self._loss_fn = partial(edge_binary_focal_crossentropy_final, alpha=weight)
         self._lr = tf.Variable(init_lr, trainable=False, dtype=tf.float32, name="lr")
         self._step = tf.Variable(0, trainable=False, dtype=tf.float32, name="tr_step")
         self._opt = snt.optimizers.__getattribute__(optimizer)(learning_rate=self._lr)  # type: ignore
@@ -111,25 +131,29 @@ class Train(snt.Module):
         self._train_data_path = train_data_path
         self._val_data_path = val_data_path
         self._batch_generator = partial(
-            init_generator,
-            scale_features=scale_features,
+            batch_generator_from_files,
+            shuffle=True,
             random_state=self._rs,
+            bidim_solution=False,
+            scaler=minmax_scale if scale_features else None,
         )
         self.set_managers()
         if compile:
-            val_generator = self._batch_generator(
-                self._val_data_path, self._val_batch_size
-            )
-            in_val_graphs, gt_val_graphs = next(val_generator)
-            in_signature, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
-            self._update_model_weights = tf.function(
-                self.__update_model_weights,
-                input_signature=[in_signature, gt_signature],
-            )
-            self._eval = tf.function(
-                self.__eval,
-                input_signature=[in_signature],
-            )
+            # val_generator = self._batch_generator(
+            #     self._val_data_path, self._val_batch_size
+            # )
+            # in_val_graphs, gt_val_graphs = next(val_generator)
+            # in_signature, gt_signature = get_signatures(in_val_graphs, gt_val_graphs)
+            # self._update_model_weights = tf.function(
+            #     self.__update_model_weights,
+            #     input_signature=[in_signature, gt_signature],
+            # )
+            # self._eval = tf.function(
+            #     self.__eval,
+            #     input_signature=[in_signature],
+            # )
+            self._update_model_weights = self.__update_model_weights
+            self._eval = self.__eval
         else:
             self._update_model_weights = self.__update_model_weights
             self._eval = self.__eval
@@ -189,18 +213,28 @@ class Train(snt.Module):
                 )
             )
 
-    def __update_model_weights(self, in_graphs, gt_graphs):
+    def __update_model_weights(self, in_graphs, gt_graphs, num_msg):
         with tf.GradientTape() as tape:
-            output_graphs = self._model(in_graphs, True)
-            loss = self._loss_fn(gt_graphs.edges, output_graphs)
+            output_graphs = self._model(in_graphs, num_msg, True)
+            loss = self._loss_fn(
+                gt_graphs.edges,
+                # output_graphs,
+                output_graphs.edges,
+                # min_num_msg=tf.cast(
+                #     tf.math.ceil(self._msg_drop_ratio * num_msg), dtype=tf.int32
+                # ),
+            )
         gradients = tape.gradient(loss, self._model.trainable_variables)
         self._opt.apply(gradients, self._model.trainable_variables)
         self._step.assign_add(1)
+        # self._step = self._step + 1
         self._lr.assign(self._schedule_lr_fn(self._step))
-        return output_graphs[-1], loss
+        # self._lr = self._schedule_lr_fn(self._step)
+        # return output_graphs[-1], loss
+        return output_graphs, loss
 
-    def __eval(self, in_graphs):
-        output_graphs = self._model(in_graphs, False)
+    def __eval(self, in_graphs, num_msg):
+        output_graphs = self._model(in_graphs, num_msg, False)
         return output_graphs
 
     def __assess_val(self):
@@ -208,13 +242,40 @@ class Train(snt.Module):
         acc = []
         loss = []
         precision = []
+        bar = tqdm(
+            total=9430,
+            desc="Processed Graphs for Validation",
+            leave=False,
+        )
         val_generator = self._batch_generator(self._val_data_path, self._val_batch_size)
         for in_graphs, gt_graphs in val_generator:
-            out_graphs = self._eval(in_graphs)
-            acc.append(get_bacc(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
-            f1.append(get_f1(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
-            precision.append(get_precision(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
-            loss.append(self._loss_fn(gt_graphs.edges, out_graphs))  # type: ignore
+            num_msg = (
+                self._num_msg
+                if isinstance(self._num_msg, int)
+                else tf.cast(
+                    tf.math.ceil(self._num_msg * tf.cast(max(in_graphs.n_node.numpy()), tf.float32)),  # type: ignore
+                    tf.int32,
+                )
+            )
+            out_graphs = self._eval(in_graphs, num_msg)
+            acc.append(get_bacc(gt_graphs.edges, out_graphs.edges))  # type: ignore
+            f1.append(get_f1(gt_graphs.edges, out_graphs.edges))  # type: ignore
+            precision.append(get_precision(gt_graphs.edges, out_graphs.edges))  # type: ignore
+            # acc.append(get_bacc(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            # f1.append(get_f1(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            # precision.append(get_precision(gt_graphs.edges, out_graphs[-1].edges))  # type: ignore
+            loss.append(
+                self._loss_fn(
+                    gt_graphs.edges,  # type: ignore
+                    out_graphs.edges,
+                    #     gt_graphs.edges,  # type: ignore
+                    #     out_graphs,
+                    #     min_num_msg=tf.cast(
+                    #         tf.math.ceil(self._msg_drop_ratio * num_msg), dtype=tf.int32
+                    #     ),
+                )
+            )
+            bar.update(in_graphs.n_node.shape[0])  # type: ignore
         return (
             tf.reduce_sum(acc) / len(acc),
             tf.reduce_sum(f1) / len(f1),
@@ -223,6 +284,7 @@ class Train(snt.Module):
         )
 
     def train(self):
+        # mem = []
         start_time = time()
         last_validation = start_time
         for epoch in range(self._start_epoch, self._num_epochs):
@@ -239,18 +301,22 @@ class Train(snt.Module):
                 seen_graphs=self._seen_graphs,
             )
             for in_graphs, gt_graphs in train_generator:
-                tr_out_graphs, tr_loss = self._update_model_weights(  # type: ignore
-                    in_graphs, gt_graphs
+                num_msg = (
+                    self._num_msg
+                    if isinstance(self._num_msg, int)
+                    else int(np.ceil(self._num_msg * max(in_graphs.n_node.numpy())))  # type: ignore
                 )
+                tr_out_graphs, tr_loss = self._update_model_weights(in_graphs, gt_graphs, num_msg)
+                # mem.append(memory_usage((self._update_model_weights, (in_graphs, gt_graphs, num_msg)))[-1])
                 delta_time = time() - last_validation
                 if delta_time >= self._delta_time_to_validate:
                     last_validation = time()
+                    tqdm.write("Validation Skip")
                     tr_acc = get_bacc(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     tr_f1 = get_f1(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     tr_precision = get_precision(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     val_acc, val_f1, val_precision, val_loss = self.__assess_val()
                     delta = tf.abs(tr_loss - val_loss)
-
                     save_pickle("random_state", self._rs)
                     mlf.log_metric("graph", self._seen_graphs)
                     mlf.log_metric("epoch", epoch)
@@ -283,14 +349,31 @@ class Train(snt.Module):
                         self._best_delta.assign(delta)
                     epoch_bar.set_postfix(
                         epoch="{} / {}".format(epoch, self._num_epochs),
-                        tr_loss="{:.4f}".format(tr_loss.numpy()),
-                        val_loss="{:.4f}".format(val_loss.numpy()),
-                        best_acc="{:.4f}".format(self._best_acc.numpy()),
-                        best_f1="{:.4f}".format(self._best_f1.numpy()),
-                        best_precision="{:.4f}".format(self._best_precision.numpy()),
-                        best_delta="{:.4f}".format(self._best_delta.numpy()),
+                        tr_loss="{:.3f}".format(tr_loss.numpy()),
+                        val_loss="{:.3f}".format(val_loss.numpy()),
+                        # best_acc="{:.3f}".format(self._best_acc.numpy()),
+                        # best_f1="{:.3f}".format(self._best_f1.numpy()),
+                        best_precision="{:.3f}".format(self._best_precision.numpy()),
+                        # best_delta="{:.4f}".format(self._best_delta.numpy()),
                     )
                 self._seen_graphs += in_graphs.n_node.shape[0]  # type: ignore
                 epoch_bar.update(in_graphs.n_node.shape[0])  # type: ignore
+                # del tr_loss
+                # del tr_out_graphs
+                # if self._seen_graphs >= 30:
+                #     break
             epoch_bar.close()
             self._seen_graphs = 0
+            # break
+
+        # import pandas as pd
+        # import seaborn as sns
+        # import matplotlib.pyplot as plt 
+        #
+        # mem = pd.DataFrame({"step": range(1, len(mem) + 1), "memory_comsumption" : mem})
+        # print(mem)
+        # print(mem.diff())
+        # sns.lineplot(mem, x="step", y="memory_comsumption")
+        # plt.savefig("total_memory.pdf")
+        # sns.lineplot(mem.diff(), x="step", y="memory_comsumption")
+        # plt.savefig("diff_memory.pdf")

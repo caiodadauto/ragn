@@ -64,6 +64,12 @@ def read_graph(graph_path, directed=False):
 def get_signatures(in_graphs, gt_graphs):
     in_signature = utils_tf.specs_from_graphs_tuple(in_graphs, True)
     gt_signature = utils_tf.specs_from_graphs_tuple(gt_graphs, True)
+    # in_signature = utils_tf.specs_from_graphs_tuple(
+    #     in_graphs, False, dynamic_num_nodes=False, dynamic_num_edges=False
+    # )
+    # gt_signature = utils_tf.specs_from_graphs_tuple(
+    #     gt_graphs, False, dynamic_num_nodes=False, dynamic_num_edges=False
+    # )
     return in_signature, gt_signature
 
 
@@ -85,7 +91,9 @@ def unsorted_segment_norm_attention_sum(
     return norm_attention
 
 
-def edge_binary_focal_crossentropy(expected, pred_graphs, min_num_msg, gamma=2, alpha=0.75):
+def edge_binary_focal_crossentropy(
+    expected, pred_graphs, min_num_msg, gamma=2, alpha=0.75
+):
     loss_for_all_msg = []
     for pred_graph in pred_graphs[min_num_msg:]:
         predicted = pred_graph.edges
@@ -96,6 +104,14 @@ def edge_binary_focal_crossentropy(expected, pred_graphs, min_num_msg, gamma=2, 
         loss_for_all_msg.append(msg_loss)
     loss = tf.math.reduce_sum(tf.stack(loss_for_all_msg))
     loss = loss / len(pred_graphs)
+    return loss
+
+
+def edge_binary_focal_crossentropy_final(expected, predicted, gamma=2, alpha=0.75):
+    losses = tf.keras.losses.binary_focal_crossentropy(  # type: ignore
+        expected, predicted, apply_class_balancing=True, gamma=gamma, alpha=alpha
+    )
+    loss = tf.math.reduce_mean(losses)
     return loss
 
 
@@ -127,7 +143,7 @@ def get_bacc(expected, predicted, th=0.5):
 def get_precision(expected, predicted, th=0.5):
     e = expected.numpy()
     p = (predicted.numpy() >= th).astype(np.int32)
-    return tf.constant(precision_score(e, p), dtype=tf.float32)
+    return tf.constant(precision_score(e, p, zero_division=0.0), dtype=tf.float32)
 
 
 def get_f1(expected, predicted, th=0.5):

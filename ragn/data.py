@@ -7,7 +7,7 @@ import networkx as nx
 from tqdm import tqdm
 from numba import jit, prange
 from sklearn.cluster import spectral_clustering
-from sklearn.preprocessing import minmax_scale
+# from sklearn.preprocessing import minmax_scale
 
 from ragn.draw import draw_ip_clusters
 from ragn.utils import to_one_hot, read_graph, pairwise, set_diff
@@ -15,7 +15,7 @@ from graph_nets.utils_np import networkx_to_data_dict
 from graph_nets.utils_tf import data_dicts_to_graphs_tuple
 
 
-__all__ = ["init_generator"]
+__all__ = ["batch_generator_from_files"]
 
 
 @jit(nopython=True, parallel=True, fastmath=True)
@@ -160,26 +160,26 @@ def add_features_to_graphs(
             )
 
 
-def init_generator(path, n_batch, scale_features, random_state, seen_graphs=0):
-    if scale_features:
-        _scaler = minmax_scale
-    else:
-        _scaler = None
-    generator = networkx_to_graph_tuple_generator(
-        batch_files_generator(
-            path,
-            n_batch,
-            shuffle=True,
-            bidim_solution=False,
-            random_state=random_state,
-            seen_graphs=seen_graphs,
-            scaler=_scaler,
-        )
-    )
-    return generator
+# def init_generator(path, n_batch, scale_features, random_state, seen_graphs=0):
+#     if scale_features:
+#         _scaler = minmax_scale
+#     else:
+#         _scaler = None
+#     generator = networkx_to_graph_tuple_generator(
+#         batch_files_generator(
+#             path,
+#             n_batch,
+#             shuffle=True,
+#             bidim_solution=False,
+#             random_state=random_state,
+#             seen_graphs=seen_graphs,
+#             scaler=_scaler,
+#         )
+#     )
+#     return generator
 
 
-def batch_files_generator(
+def batch_generator_from_files(
     source_path,
     n_batch,
     shuffle=False,
@@ -214,7 +214,9 @@ def batch_files_generator(
             dtype=dtype,
             random_state=random_state,
         )
-        yield input_batch, target_batch
+        gt_in_graphs = networkxs_to_graphs_tuple(input_batch)
+        gt_gt_graphs = networkxs_to_graphs_tuple(target_batch)
+        yield gt_in_graphs, gt_gt_graphs
 
 
 def read_from_files(
@@ -296,11 +298,11 @@ def create_feature(attr, fields, dtype):
     return np.hstack(features).astype(dtype)
 
 
-def networkx_to_graph_tuple_generator(nx_generator):
-    for nx_in_graphs, nx_gt_graphs in nx_generator:
-        gt_in_graphs = networkxs_to_graphs_tuple(nx_in_graphs)
-        gt_gt_graphs = networkxs_to_graphs_tuple(nx_gt_graphs)
-        yield gt_in_graphs, gt_gt_graphs
+# def networkx_to_graph_tuple_generator(nx_generator):
+#     for nx_in_graphs, nx_gt_graphs in nx_generator:
+#         gt_in_graphs = networkxs_to_graphs_tuple(nx_in_graphs)
+#         gt_gt_graphs = networkxs_to_graphs_tuple(nx_gt_graphs)
+#         yield gt_in_graphs, gt_gt_graphs
 
 
 def networkxs_to_graphs_tuple(

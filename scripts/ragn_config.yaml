@@ -1,4 +1,7 @@
 seed: 12345
+num_msg: 0.2
+debug: false
+tensor_debug_mode: "CONCISE_HEALTH"
 defaults:  
   - _self_  
   - override hydra/hydra_logging: disabled  
@@ -11,11 +14,11 @@ mlflow:
   exp_name: "Training RAGN"
   load_runs: false
 data:
-  train_data_size: 400000
+  train_data_size: 64172 # 219 150892
   train_data_path: "data/train"
   val_data_path: "data/val"
 train:
-  compile: false
+  compile: true
   num_epochs: 60
   init_lr: 1e-3
   end_lr: 1e-5
@@ -27,16 +30,26 @@ train:
   val_batch_size: 1 # 200
   msg_drop_ratio: 0.4 # Percentage of partial results from message passing that will not be consider in loss function.
   weight: 0.75 # The weight for routing links, the weight is used for loss computation.
-  delta_time_to_validate: 3600 # The interval time that the validation dataseet should be assessed.
+  delta_time_to_validate: 1800 # The interval time that the validation dataseet should be assessed.
   scale_features: true
 model:
-  num_msg: 0.15
   # node_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
   # edge_enc_conf: [[[64, 2, 1, "SAME"], [64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
   # link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [96, 64, 32, 32], 3]
-  node_enc_conf: [[[64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
-  edge_enc_conf: [[[64, 2, 1, "SAME"], [32, 2, 2, "SAME"], [32, 2, 2, "SAME"]], [64, 48, 32]]
-  link_decision_conf: [3, [32, 16, 4, 1], [32, 16, 32], [64, 32], 2]
-  lstm_conf: [32, 2]
+  # lstm_conf: [32, 2]
+  # --------------------------
+  # node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  # edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  # link_decision_conf: [3, [32, 16, 4, 1], [32, 16, 32], [32, 32], 2]
+  # lstm_conf: [32, 2]
+  # --------------------------
+  node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  link_decision_conf: [1, [32, 1], [32], [32], 1]
+  lstm_conf: [32, 1]
+  # node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"]], [16]]
+  # edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"]], [16]]
+  # link_decision_conf: [1, [16, 1], [16], [16], 1]
+  # lstm_conf: [16, 1]
   create_offset: true
   create_scale: true

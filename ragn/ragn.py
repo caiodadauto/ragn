@@ -1,7 +1,6 @@
 from functools import partial
 
 import sonnet as snt
-import tensorflow as tf
 from graph_nets import modules
 from graph_nets.utils_tf import concat as gn_concat
 
@@ -12,7 +11,6 @@ from ragn.snt_modules import make_edge_conv2d_model, make_node_conv2d_model
 class RAGN(snt.Module):
     def __init__(
         self,
-        num_msg,
         lstm_conf,
         edge_enc_conf,
         node_enc_conf,
@@ -22,7 +20,6 @@ class RAGN(snt.Module):
         name="RAGN",
     ):
         super(RAGN, self).__init__(name=name)
-        self._num_msg = num_msg
         self._encoder = modules.GraphIndependent(
             edge_model_fn=partial(
                 make_edge_conv2d_model,
@@ -45,28 +42,21 @@ class RAGN(snt.Module):
             create_offset=create_offset,
         )
 
-    def __call__(self, graphs, is_training):
-        out_graphs = []
+    def __call__(self, graphs, num_msg, is_training):
+        # out_graphs = []
         kwargs = dict(is_training=is_training)
         init_latent = self._encoder(
             graphs, edge_model_kwargs=kwargs, node_model_kwargs=kwargs
         )
         latent = init_latent
-        num_msg = (
-            self._num_msg
-            if isinstance(self._num_msg, int)
-            else tf.cast(
-                tf.math.ceil(self._num_msg * tf.cast(graphs.n_node[0], tf.float32)),
-                tf.int32,
-            )
-        )
         self._core.reset_state(graphs, **kwargs)
         for _ in range(num_msg):  # type: ignore
             core_input = gn_concat([init_latent, latent], axis=1, use_globals=False)
             latent = self._core(
                 core_input, edge_model_kwargs=kwargs, node_model_kwargs=kwargs
             )
-            out_graphs.append(
-                self._link_decision(latent, init_latent, is_training=is_training)
-            )
-        return out_graphs
+        #     out_graphs.append(
+        #         self._link_decision(latent, init_latent, is_training=is_training)
+        #     )
+        # return out_graphs
+        return self._link_decision(latent, init_latent, is_training=is_training)

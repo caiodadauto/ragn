@@ -7,7 +7,8 @@ def make_mlp_model(conf):
 
 
 def make_lstm_model(conf, create_scale, create_offset):
-    return NormLSTM(conf, create_scale, create_offset)
+    # return NormLSTM(conf, create_scale, create_offset)
+    return NormLSTMv2(conf, create_scale, create_offset)
 
 
 def make_norm_mlp_model(conf, create_scale, create_offset):
@@ -28,6 +29,39 @@ def make_edge_conv2d_model(conf, create_scale, create_offset):
 
 def make_node_conv2d_model(conf, create_scale, create_offset):
     return NodeConv2D(conf, create_scale, create_offset)
+
+
+class NormLSTMv2(snt.Module):
+    def __init__(
+        self,
+        conf,
+        create_scale=False,
+        create_offset=False,
+        name="NormLSTMv2",
+    ):
+        super(NormLSTMv2, self).__init__(name=name)
+        self._hidden_size = conf[0]
+        self._lstms = []
+        for _ in range(conf[1]):
+            self._lstms.append(snt.LSTM(self._hidden_size))
+        self._norm = snt.BatchNorm(create_scale, create_offset)
+        # self._norm = snt.LayerNorm(
+        #     -1, create_scale=create_scale, create_offset=create_offset
+        # )
+
+    def initial_state(self, batch_size, is_training):
+        return [lstm.initial_state(batch_size) for lstm in self._lstms]
+
+    def __call__(self, inputs, prev_states, is_training):
+        next_states = []
+        outputs = inputs
+        for lstm, state in zip(self._lstms, prev_states):
+            outputs, next_state = lstm(inputs, state)
+            outputs = tf.nn.tanh(outputs)
+            next_states.append(next_state)
+        outputs = self._norm(outputs, is_training)  # type: ignore
+        # outputs = self._norm(outputs)  # type: ignore
+        return outputs, next_states
 
 
 class NormLSTM(snt.Module):
@@ -51,10 +85,10 @@ class NormLSTM(snt.Module):
             train_lstm.append(dropout_lstm)
         self._test_lstm = snt.DeepRNN(test_lstm)
         self._train_lstm = snt.DeepRNN(train_lstm)
-        # self._norm = snt.BatchNorm(create_scale, create_offset)
-        self._norm = snt.LayerNorm(
-            -1, create_scale=create_scale, create_offset=create_offset
-        )
+        self._norm = snt.BatchNorm(create_scale, create_offset)
+        # self._norm = snt.LayerNorm(
+        #     -1, create_scale=create_scale, create_offset=create_offset
+        # )
 
     def initial_state(self, batch_size, is_training):
         if is_training:
@@ -69,9 +103,10 @@ class NormLSTM(snt.Module):
         else:
             outputs, next_states = self._test_lstm(inputs, prev_states[0])
             next_states = (next_states,)
-        # outputs = self._norm(outputs, is_training)  # type: ignore
-        outputs = self._norm(outputs)  # type: ignore
-        outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
+        outputs = self._norm(outputs, is_training)  # type: ignore
+        # outputs = self._norm(outputs)  # type: ignore
+        # outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
+        outputs = tf.nn.sigmoid(outputs)
         return outputs, next_states
 
 
@@ -87,6 +122,7 @@ class MLP(snt.Module):
         self._dropout_rate = dropout_rate
         for hidden_size in conf:
             self._linear_layers.append(snt.Linear(hidden_size))
+            # self._linear_layers.append(tf.keras.layers.Dense(hidden_size))
 
     def __call__(self, inputs, is_training):
         outputs_op = inputs
@@ -94,7 +130,8 @@ class MLP(snt.Module):
             if is_training:
                 outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
             outputs_op = linear(outputs_op)
-            outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+            # outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+            outputs_op = tf.nn.sigmoid(outputs_op)
         return outputs_op
 
 
@@ -108,27 +145,33 @@ class NormMLP(snt.Module):
         name="NormMLP",
     ):
         super(NormMLP, self).__init__(name=name)
-        self._norms = []
+        # self._norms = []
         self._linear_layers = []
         self._dropout_rate = dropout_rate
         for hidden_size in conf:
             self._linear_layers.append(snt.Linear(hidden_size))
+            # self._linear_layers.append(tf.keras.layers.Dense(hidden_size))
             # self._norms.append(snt.BatchNorm(create_scale, create_offset))
-            self._norms.append(
-                snt.LayerNorm(
-                    -1, create_scale=create_scale, create_offset=create_offset
-                )
-            )
+            # self._norms.append(
+            #     snt.LayerNorm(
+            #         -1, create_scale=create_scale, create_offset=create_offset
+            #     )
+            # )
+        self._norm = snt.BatchNorm(create_scale, create_offset)
 
     def __call__(self, inputs, is_training):
         outputs_op = inputs
-        for linear, norm in zip(self._linear_layers, self._norms):
+        # for linear, norm in zip(self._linear_layers, self._norms):
+        for linear in self._linear_layers:
             if is_training:
                 outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
             outputs_op = linear(outputs_op)
             # outputs_op = norm(outputs_op, is_training)
-            outputs_op = norm(outputs_op)
-            outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+            # outputs_op = norm(outputs_op)
+            # outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+            # outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
+            outputs_op = tf.nn.sigmoid(outputs_op)
+        outputs_op = self._norm(outputs_op, is_training)
         return outputs_op
 
 
@@ -240,8 +283,10 @@ class NodeConv2D(snt.Module):
         for conv in self._convs[0:-2]:
             outputs = conv(outputs)
             outputs = outputs * tf.repeat(prefixes, repeats=[outputs.shape[3]], axis=3)
+            outputs = tf.nn.sigmoid(outputs)
         for conv in self._convs[-2:]:
             outputs = conv(outputs)
+            outputs = tf.nn.sigmoid(outputs)
         outputs = snt.flatten(outputs)
         outputs = self._mlp(outputs, **kwargs)
         return outputs
