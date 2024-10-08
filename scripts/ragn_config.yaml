@@ -14,7 +14,7 @@ mlflow:
   exp_name: "Training RAGN"
   load_runs: false
 data:
-  train_data_size: 64172 # 219 150892
+  train_data_size: 150892 # 219 64172
   train_data_path: "data/train"
   val_data_path: "data/val"
 train:
@@ -38,15 +38,16 @@ model:
   # link_decision_conf: [3, [32, 16, 8, 4, 1], [32, 48, 48, 32], [96, 64, 32, 32], 3]
   # lstm_conf: [32, 2]
   # --------------------------
-  # node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
-  # edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
-  # link_decision_conf: [3, [32, 16, 4, 1], [32, 16, 32], [32, 32], 2]
-  # lstm_conf: [32, 2]
-  # --------------------------
   node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
   edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
-  link_decision_conf: [1, [32, 1], [32], [32], 1]
-  lstm_conf: [32, 1]
+  link_decision_conf: [3, [32, 16, 4, 1], [32, 16, 32], [32, 32], 2]
+  lstm_conf: [32, 2]
+  # --------------------------
+  # node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  # edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"], [16, 2, 2, "SAME"]], [32, 16, 32]]
+  # link_decision_conf: [1, [32, 1], [32], [32], 1]
+  # lstm_conf: [32, 1]
+  # --------------------------
   # node_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"]], [16]]
   # edge_enc_conf: [[[32, 2, 1, "SAME"], [16, 2, 2, "SAME"]], [16]]
   # link_decision_conf: [1, [16, 1], [16], [16], 1]

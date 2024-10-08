@@ -14,6 +14,7 @@ from ragn.utils_mlf import (
     save_pickle,
 )
 from sklearn.preprocessing import minmax_scale
+
 # from memory_profiler import memory_usage
 
 from ragn.ragn import RAGN
@@ -68,7 +69,7 @@ def train_ragn(
         estimator.train()
         # tf.profiler.experimental.server.start(6009)
         # tf.profiler.experimental.client.trace('grpc://localhost:6009',
-                                        # '/nfs/tb_log', 2000)
+        # '/nfs/tb_log', 2000)
         # estimator.train()
 
 
@@ -247,7 +248,9 @@ class Train(snt.Module):
             desc="Processed Graphs for Validation",
             leave=False,
         )
-        val_generator = self._batch_generator(self._val_data_path, self._val_batch_size)
+        val_generator = self._batch_generator(
+            self._val_data_path, self._val_batch_size, sample=0.2
+        )
         for in_graphs, gt_graphs in val_generator:
             num_msg = (
                 self._num_msg
@@ -285,8 +288,8 @@ class Train(snt.Module):
 
     def train(self):
         # mem = []
-        start_time = time()
-        last_validation = start_time
+        # start_time = time()
+        # last_validation = start_time
         for epoch in range(self._start_epoch, self._num_epochs):
             epoch_bar = tqdm(
                 total=self._train_data_size,
@@ -306,11 +309,17 @@ class Train(snt.Module):
                     if isinstance(self._num_msg, int)
                     else int(np.ceil(self._num_msg * max(in_graphs.n_node.numpy())))  # type: ignore
                 )
-                tr_out_graphs, tr_loss = self._update_model_weights(in_graphs, gt_graphs, num_msg)
+                tr_out_graphs, tr_loss = self._update_model_weights(
+                    in_graphs, gt_graphs, num_msg
+                )
+                self._seen_graphs += in_graphs.n_node.shape[0]  # type: ignore
                 # mem.append(memory_usage((self._update_model_weights, (in_graphs, gt_graphs, num_msg)))[-1])
-                delta_time = time() - last_validation
-                if delta_time >= self._delta_time_to_validate:
-                    last_validation = time()
+                # delta_time = time() - last_validation
+                # if delta_time >= self._delta_time_to_validate:
+                if (self._seen_graphs % (self._train_data_size // 4)) == 0 or (
+                    self._seen_graphs == self._train_data_size
+                ):
+                    # last_validation = time()
                     tqdm.write("Validation Skip")
                     tr_acc = get_bacc(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     tr_f1 = get_f1(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
@@ -356,7 +365,6 @@ class Train(snt.Module):
                         best_precision="{:.3f}".format(self._best_precision.numpy()),
                         # best_delta="{:.4f}".format(self._best_delta.numpy()),
                     )
-                self._seen_graphs += in_graphs.n_node.shape[0]  # type: ignore
                 epoch_bar.update(in_graphs.n_node.shape[0])  # type: ignore
                 # del tr_loss
                 # del tr_out_graphs
@@ -368,7 +376,7 @@ class Train(snt.Module):
 
         # import pandas as pd
         # import seaborn as sns
-        # import matplotlib.pyplot as plt 
+        # import matplotlib.pyplot as plt
         #
         # mem = pd.DataFrame({"step": range(1, len(mem) + 1), "memory_comsumption" : mem})
         # print(mem)

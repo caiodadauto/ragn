@@ -188,6 +188,7 @@ def batch_generator_from_files(
     random_state=None,
     seen_graphs=0,
     dtype=np.float32,
+    sample=-1.0,
 ):
     random_state = np.random.RandomState() if random_state is None else random_state
     names = [
@@ -196,6 +197,8 @@ def batch_generator_from_files(
     ]
     if shuffle:
         random_state.shuffle(names)
+    if sample > 0 and sample < 1:
+        names = random_state.choice(names, int(len(names) * sample), replace=False)
     if seen_graphs > 0:
         names = names[seen_graphs + 1 :]
     num_graphs = len(names)
