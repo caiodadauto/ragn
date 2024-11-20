@@ -64,50 +64,50 @@ class NormLSTMv2(snt.Module):
         return outputs, next_states
 
 
-class NormLSTM(snt.Module):
-    def __init__(
-        self,
-        conf,
-        create_scale=False,
-        create_offset=False,
-        recurrent_dropout=0.35,
-        name="NormLSTM",
-    ):
-        super(NormLSTM, self).__init__(name=name)
-        self._hidden_size = conf[0]
-        train_lstm = []
-        test_lstm = []
-        for _ in range(conf[1]):
-            dropout_lstm, lstm = snt.lstm_with_recurrent_dropout(
-                self._hidden_size, dropout=recurrent_dropout
-            )
-            test_lstm.append(lstm)
-            train_lstm.append(dropout_lstm)
-        self._test_lstm = snt.DeepRNN(test_lstm)
-        self._train_lstm = snt.DeepRNN(train_lstm)
-        self._norm = snt.BatchNorm(create_scale, create_offset)
-        # self._norm = snt.LayerNorm(
-        #     -1, create_scale=create_scale, create_offset=create_offset
-        # )
-
-    def initial_state(self, batch_size, is_training):
-        if is_training:
-            return self._train_lstm.initial_state(batch_size)
-        else:
-            init_states = self._test_lstm.initial_state(batch_size)
-            return (init_states,)
-
-    def __call__(self, inputs, prev_states, is_training):
-        if is_training:
-            outputs, next_states = self._train_lstm(inputs, prev_states)
-        else:
-            outputs, next_states = self._test_lstm(inputs, prev_states[0])
-            next_states = (next_states,)
-        outputs = self._norm(outputs, is_training)  # type: ignore
-        # outputs = self._norm(outputs)  # type: ignore
-        # outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
-        outputs = tf.nn.sigmoid(outputs)
-        return outputs, next_states
+# class NormLSTM(snt.Module):
+#     def __init__(
+#         self,
+#         conf,
+#         create_scale=False,
+#         create_offset=False,
+#         recurrent_dropout=0.35,
+#         name="NormLSTM",
+#     ):
+#         super(NormLSTM, self).__init__(name=name)
+#         self._hidden_size = conf[0]
+#         train_lstm = []
+#         test_lstm = []
+#         for _ in range(conf[1]):
+#             dropout_lstm, lstm = snt.lstm_with_recurrent_dropout(
+#                 self._hidden_size, dropout=recurrent_dropout
+#             )
+#             test_lstm.append(lstm)
+#             train_lstm.append(dropout_lstm)
+#         self._test_lstm = snt.DeepRNN(test_lstm)
+#         self._train_lstm = snt.DeepRNN(train_lstm)
+#         self._norm = snt.BatchNorm(create_scale, create_offset)
+#         # self._norm = snt.LayerNorm(
+#         #     -1, create_scale=create_scale, create_offset=create_offset
+#         # )
+#
+#     def initial_state(self, batch_size, is_training):
+#         if is_training:
+#             return self._train_lstm.initial_state(batch_size)
+#         else:
+#             init_states = self._test_lstm.initial_state(batch_size)
+#             return (init_states,)
+#
+#     def __call__(self, inputs, prev_states, is_training):
+#         if is_training:
+#             outputs, next_states = self._train_lstm(inputs, prev_states)
+#         else:
+#             outputs, next_states = self._test_lstm(inputs, prev_states[0])
+#             next_states = (next_states,)
+#         outputs = self._norm(outputs, is_training)  # type: ignore
+#         # outputs = self._norm(outputs)  # type: ignore
+#         # outputs = tf.nn.leaky_relu(outputs, alpha=0.2)
+#         outputs = tf.nn.sigmoid(outputs)
+#         return outputs, next_states
 
 
 class MLP(snt.Module):
@@ -120,6 +120,8 @@ class MLP(snt.Module):
         super(MLP, self).__init__(name=name)
         self._linear_layers = []
         self._dropout_rate = dropout_rate
+        self._generator = tf.random.Generator.from_seed(12345)
+        self._uniform_sampler = self._generator.uniform
         for hidden_size in conf:
             self._linear_layers.append(snt.Linear(hidden_size))
             # self._linear_layers.append(tf.keras.layers.Dense(hidden_size))
@@ -128,7 +130,12 @@ class MLP(snt.Module):
         outputs_op = inputs
         for linear in self._linear_layers:
             if is_training:
-                outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+                # outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+                outputs_op = tf.nn.experimental.general_dropout(
+                    outputs_op,
+                    rate=self._dropout_rate,
+                    uniform_sampler=self._uniform_sampler,
+                )
             outputs_op = linear(outputs_op)
             # outputs_op = tf.nn.leaky_relu(outputs_op, alpha=0.2)
             outputs_op = tf.nn.sigmoid(outputs_op)
@@ -148,6 +155,8 @@ class NormMLP(snt.Module):
         # self._norms = []
         self._linear_layers = []
         self._dropout_rate = dropout_rate
+        self._generator = tf.random.Generator.from_seed(12345)
+        self._uniform_sampler = self._generator.uniform
         for hidden_size in conf:
             self._linear_layers.append(snt.Linear(hidden_size))
             # self._linear_layers.append(tf.keras.layers.Dense(hidden_size))
@@ -164,7 +173,12 @@ class NormMLP(snt.Module):
         # for linear, norm in zip(self._linear_layers, self._norms):
         for linear in self._linear_layers:
             if is_training:
-                outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+                # outputs_op = tf.nn.dropout(outputs_op, self._dropout_rate)
+                outputs_op = tf.nn.experimental.general_dropout(
+                    outputs_op,
+                    rate=self._dropout_rate,
+                    uniform_sampler=self._uniform_sampler,
+                )
             outputs_op = linear(outputs_op)
             # outputs_op = norm(outputs_op, is_training)
             # outputs_op = norm(outputs_op)

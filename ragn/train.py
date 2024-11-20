@@ -26,7 +26,7 @@ from ragn.utils import (
     get_f1,
     get_precision,
 )
-from ragn.data import batch_generator_from_files
+from ragn.data import batch_generator_from_files, networkxs_to_graphs_tuple
 
 
 def train_ragn(
@@ -114,7 +114,7 @@ class Train(snt.Module):
         self._best_acc = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_f1 = tf.Variable(0.0, trainable=False, dtype=tf.float32)
         self._best_precision = tf.Variable(0.0, trainable=False, dtype=tf.float32)
-        self._best_delta = tf.Variable(np.infty, trainable=False, dtype=tf.float32)
+        self._best_delta = tf.Variable(np.inf, trainable=False, dtype=tf.float32)
         self._delta_time_to_validate = delta_time_to_validate
         self._model = model
         self._train_data_size = train_data_size
@@ -251,7 +251,9 @@ class Train(snt.Module):
         val_generator = self._batch_generator(
             self._val_data_path, self._val_batch_size, sample=0.2
         )
-        for in_graphs, gt_graphs in val_generator:
+        for input_batch, target_batch in val_generator:
+            in_graphs = networkxs_to_graphs_tuple(input_batch)
+            gt_graphs = networkxs_to_graphs_tuple(target_batch)
             num_msg = (
                 self._num_msg
                 if isinstance(self._num_msg, int)
@@ -303,7 +305,9 @@ class Train(snt.Module):
                 self._train_batch_size,
                 seen_graphs=self._seen_graphs,
             )
-            for in_graphs, gt_graphs in train_generator:
+            for input_batch, target_batch in train_generator:
+                in_graphs = networkxs_to_graphs_tuple(input_batch)
+                gt_graphs = networkxs_to_graphs_tuple(target_batch)
                 num_msg = (
                     self._num_msg
                     if isinstance(self._num_msg, int)

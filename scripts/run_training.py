@@ -19,4 +19,6 @@ def my_app(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     my_app()

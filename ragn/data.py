@@ -217,9 +217,7 @@ def batch_generator_from_files(
             dtype=dtype,
             random_state=random_state,
         )
-        gt_in_graphs = networkxs_to_graphs_tuple(input_batch)
-        gt_gt_graphs = networkxs_to_graphs_tuple(target_batch)
-        yield gt_in_graphs, gt_gt_graphs
+        yield input_batch, target_batch
 
 
 def read_from_files(
