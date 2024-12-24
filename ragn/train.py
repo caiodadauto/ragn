@@ -243,13 +243,14 @@ class Train(snt.Module):
         acc = []
         loss = []
         precision = []
+        sample = 0.15
         bar = tqdm(
-            total=9430,
+            total=int(9430 * sample),
             desc="Processed Graphs for Validation",
             leave=False,
         )
         val_generator = self._batch_generator(
-            self._val_data_path, self._val_batch_size, sample=0.2
+            self._val_data_path, self._val_batch_size, sample=sample
         )
         for input_batch, target_batch in val_generator:
             in_graphs = networkxs_to_graphs_tuple(input_batch)
@@ -317,14 +318,9 @@ class Train(snt.Module):
                     in_graphs, gt_graphs, num_msg
                 )
                 self._seen_graphs += in_graphs.n_node.shape[0]  # type: ignore
-                # mem.append(memory_usage((self._update_model_weights, (in_graphs, gt_graphs, num_msg)))[-1])
-                # delta_time = time() - last_validation
-                # if delta_time >= self._delta_time_to_validate:
                 if (self._seen_graphs % (self._train_data_size // 4)) == 0 or (
                     self._seen_graphs == self._train_data_size
                 ):
-                    # last_validation = time()
-                    tqdm.write("Validation Skip")
                     tr_acc = get_bacc(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     tr_f1 = get_f1(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore
                     tr_precision = get_precision(gt_graphs.edges, tr_out_graphs.edges)  # type: ignore

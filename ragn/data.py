@@ -7,6 +7,7 @@ import networkx as nx
 from tqdm import tqdm
 from numba import jit, prange
 from sklearn.cluster import spectral_clustering
+
 # from sklearn.preprocessing import minmax_scale
 
 from ragn.draw import draw_ip_clusters
@@ -198,7 +199,10 @@ def batch_generator_from_files(
     if shuffle:
         random_state.shuffle(names)
     if sample > 0 and sample < 1:
-        names = random_state.choice(names, int(len(names) * sample), replace=False)
+        name_idx = random_state.choice(
+            range(len(names)), int(len(names) * sample), replace=False
+        )
+        names = [names[i] for i in name_idx]
     if seen_graphs > 0:
         names = names[seen_graphs + 1 :]
     num_graphs = len(names)
